@@ -1,5 +1,5 @@
 {
-  "originHash" : "7cea466af50b7627e244e6a4581ad586750aa30db49b2c7832883c263f683863",
+  "originHash" : "9db52e6d3f78e15fa542da4936b29fad2feecab71c7c29cea1916cabff9dd7da",
   "pins" : [
     {
       "identity" : "aboutwindow",
@@ -11,21 +11,21 @@
       }
     },
     {
-      "identity" : "codeeditwelcomewindow",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/CodeEditApp/CodeEditWelcomeWindow",
-      "state" : {
-        "revision" : "a23cb09e34e781079981260aaa576e7e18969737",
-        "version" : "1.0.1"
-      }
-    },
-    {
       "identity" : "swiftlintplugin",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/lukepistrol/SwiftLintPlugin",
       "state" : {
         "revision" : "3780efccceaa87f17ec39638a9d263d0e742b71c",
         "version" : "0.59.1"
+      }
+    },
+    {
+      "identity" : "welcomewindow",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/happyjem/WelcomeWindow.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "7f616fbf8c668f88751abfc086f77a58143c958c"
       }
     }
   ],
