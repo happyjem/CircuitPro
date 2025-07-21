@@ -1,231 +1,160 @@
 import SwiftUI
 import AppKit
 
-/// Draws a poly-line made of `ConnectionSegment`s.
 struct ConnectionTool: CanvasTool, Equatable, Hashable {
+    let id = "connection"
+    let symbolName = CircuitProSymbols.Schematic.connectionWire // Assuming this exists
+    let label = "Connection"
 
-    // MARK: – Metadata required by CanvasTool
-    let id         = "connection"
-    let symbolName = CircuitProSymbols.Schematic.connectionWire
-    let label      = "Connection"
+    // MARK: - Types
+    private enum DrawingDirection: Equatable, Hashable {
+        case horizontal
+        case vertical
 
-    // MARK: – Internal drawing state
-    private struct DrawingState {
-        var graph: ConnectionGraph
-        var vertexHistory: [UUID] // History of ALL vertices added, in order.
-        var lastVertexID: UUID { vertexHistory.last! }
-        var initialHitTarget: ConnectionHitTarget?
-    }
-    private var drawingState: DrawingState?
-    
-    public private(set) var initialHitTargetForMerge: ConnectionHitTarget?
-    
-    var isIdle: Bool { drawingState == nil }
-
-    mutating func resetMergeTarget() {
-        initialHitTargetForMerge = nil
+        func toggled() -> DrawingDirection {
+            self == .horizontal ? .vertical : .horizontal
+        }
     }
 
-    // MARK: – CanvasTool conformance
-    mutating func handleTap(at loc: CGPoint,
-                            context: CanvasToolContext) -> CanvasElement? {
-        // If the tool is idle (no drawing state), this tap starts a new drawing session.
-        guard var currentDrawing = drawingState else {
-            let newGraph = ConnectionGraph()
-            let startVertex = newGraph.addVertex(at: loc)
-            let hitTarget = context.hitTarget
-            self.drawingState = DrawingState(graph: newGraph, vertexHistory: [startVertex.id], initialHitTarget: hitTarget)
-            self.initialHitTargetForMerge = hitTarget
-            return nil // Don't return an element yet.
-        }
-
-        // If we are already drawing, check for finalization conditions.
-        guard let lastVertex = currentDrawing.graph.vertices[currentDrawing.lastVertexID] else {
-            self.drawingState = nil // Reset state
-            self.initialHitTargetForMerge = nil
-            return nil
-        }
-
-        // --- Finalization Logic ---
-        let isDoubleTap = context.clickCount > 1
-
-        let externalHitIsEmpty: Bool
-        switch context.hitTarget {
-        case .some(.emptySpace), .none:
-            externalHitIsEmpty = true
-        default:
-            externalHitIsEmpty = false
-        }
-
-        let selfHit = currentDrawing.graph.hitTest(at: loc, tolerance: 5.0 / context.magnification)
-        let selfHitIsEmpty: Bool
-        switch selfHit {
-        case .emptySpace:
-            selfHitIsEmpty = true
-        default:
-            selfHitIsEmpty = false
-        }
-
-        // Finalize on a double-tap, or a single-tap on an existing element or the connection itself.
-        // A single-tap in empty space continues drawing.
-        let shouldFinalize = isDoubleTap || !externalHitIsEmpty || !selfHitIsEmpty
-
-        if shouldFinalize {
-            // --- Finalization Behavior ---
-            var drawFinalSegment = true
-            if case .vertex(let hitVertexID, _, let type) = selfHit {
-                // If we clicked on a corner of the line we're currently drawing,
-                // we are just finalizing the shape, not closing a loop.
-                if type == .corner && currentDrawing.vertexHistory.contains(hitVertexID) {
-                    drawFinalSegment = false
-                }
-            }
-
-            if drawFinalSegment {
-                _ = addOrthogonalSegment(to: currentDrawing.graph, from: lastVertex.point, to: loc)
-            }
-
-            // If the final click was on an edge, we need to split that edge to form a T-junction.
-            if case .edge(let edgeID, let point, _) = selfHit {
-                currentDrawing.graph.splitEdge(edgeID, at: point)
-            }
-
-            // Clean up the graph and return the final element.
-            currentDrawing.graph.simplifyCollinearSegments()
-            let finalElement = ConnectionElement(graph: currentDrawing.graph)
-            drawingState = nil
-            // Don't reset initialHitTargetForMerge here; the controller needs it.
-            return .connection(finalElement)
-        }
-
-        // --- Continue Drawing Logic ---
-        let newVertexIDs = addOrthogonalSegment(to: currentDrawing.graph, from: lastVertex.point, to: loc)
-        currentDrawing.vertexHistory.append(contentsOf: newVertexIDs)
-        self.drawingState = currentDrawing // Write back the modified state
-        return nil
+    // MARK: - State
+    private enum State: Equatable, Hashable {
+        case idle
+        case drawing(from: CanvasHitTarget?, at: CGPoint, direction: DrawingDirection)
     }
 
-    func drawPreview(in ctx: CGContext,
-                     mouse: CGPoint,
-                     context: CanvasToolContext) {
-        guard let drawingState = drawingState,
-              let lastVertex = drawingState.graph.vertices[drawingState.lastVertexID] else { return }
+    private var state: State = .idle
 
-        ctx.saveGState()
-        defer { ctx.restoreGState() }
-
-        // 1. Draw the existing, committed part of the graph (solid)
-        ctx.setLineWidth(1)
-        ctx.setLineCap(.round)
-        ctx.setStrokeColor(NSColor(.blue).cgColor)
-        ctx.beginPath()
-        for edge in drawingState.graph.edges.values {
-            guard let start = drawingState.graph.vertices[edge.start]?.point,
-                  let end = drawingState.graph.vertices[edge.end]?.point else { continue }
-            ctx.move(to: start)
-            ctx.addLine(to: end)
+    // MARK: – CanvasTool Conformance
+    mutating func handleTap(at loc: CGPoint, context: CanvasToolContext) -> CanvasToolResult {
+        guard let graph = context.schematicGraph else {
+            assertionFailure("ConnectionTool requires a schematic graph in the context.")
+            return .noResult
         }
-        ctx.strokePath()
 
-        // 2. Draw the preview L-shape to the mouse cursor (dotted, gray)
-        ctx.setStrokeColor(NSColor(.blue.opacity(0.7)).cgColor)
-        ctx.setLineDash(phase: 0, lengths: [4])
+        if context.clickCount > 1 {
+            state = .idle
+            return .schematicModified
+        }
+
+        switch state {
+        case .idle:
+            // 1. Determine initial drawing direction from the hit target
+            let initialDirection = determineInitialDirection(from: context.hitTarget)
+            state = .drawing(from: context.hitTarget, at: loc, direction: initialDirection)
+            return .noResult
+
+        case .drawing(let startTarget, let startPoint, let direction):
+            let endTarget = context.hitTarget
+
+            if startTarget == nil && endTarget == nil && startPoint == loc { return .noResult }
+
+            let startVertexID = getOrCreateVertex(at: startPoint, from: startTarget, in: graph)
+            let endVertexID = getOrCreateVertex(at: loc, from: endTarget, in: graph)
+
+            if startVertexID == endVertexID {
+                state = .idle
+                return .schematicModified
+            }
+
+            // 2. Determine if the requested connection is a straight line
+            let isStraightLine = (startPoint.x == loc.x || startPoint.y == loc.y)
+
+            // 3. Connect vertices using the current direction strategy
+            let strategy: SchematicGraph.ConnectionStrategy = (direction == .horizontal) ? .horizontalThenVertical : .verticalThenHorizontal
+            graph.connect(from: startVertexID, to: endVertexID, preferring: strategy)
+
+            // 4. Update state for the next segment
+            if endTarget == nil {
+                // 4.1. Only toggle the direction if a straight line was just drawn
+                let newDirection = isStraightLine ? direction.toggled() : direction
+                
+                // FIXME: The VertexType here is a guess. We don't have enough info.
+                let newStartTarget = CanvasHitTarget.connection(part: .vertex(id: endVertexID, position: loc, type: .corner))
+                state = .drawing(from: newStartTarget, at: loc, direction: newDirection)
+            } else {
+                state = .idle
+            }
+        }
         
-        let previewGraph = ConnectionGraph()
-        // Get the orientation from the *real* graph to ensure the preview is accurate.
-        let lastOrientation = drawingState.graph.lastSegmentOrientation(before: drawingState.lastVertexID)
-        _ = addOrthogonalSegment(to: previewGraph, from: lastVertex.point, to: mouse, givenOrientation: lastOrientation)
-        
-        ctx.beginPath()
-        for edge in previewGraph.edges.values {
-            guard let start = previewGraph.vertices[edge.start]?.point,
-                  let end = previewGraph.vertices[edge.end]?.point else { continue }
-            ctx.move(to: start)
-            ctx.addLine(to: end)
+        return .schematicModified
+    }
+
+    func drawPreview(in ctx: CGContext, mouse: CGPoint, context: CanvasToolContext) {
+        // 1. Get drawing state, including the direction
+        guard case .drawing(_, let startPoint, let direction) = state else { return }
+
+        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
+        ctx.setLineWidth(1.0 / context.magnification)
+        ctx.setLineDash(phase: 0, lengths: [4 / context.magnification, 2 / context.magnification])
+
+        // 2. Determine corner based on current drawing direction
+        let corner: CGPoint
+        switch direction {
+        case .horizontal:
+            corner = CGPoint(x: mouse.x, y: startPoint.y)
+        case .vertical:
+            corner = CGPoint(x: startPoint.x, y: mouse.y)
         }
+        
+        // 3. Draw the preview lines
+        ctx.move(to: startPoint)
+        ctx.addLine(to: corner)
+        ctx.addLine(to: mouse)
         ctx.strokePath()
     }
 
-    // MARK: – Keyboard helpers
+    // MARK: - Tool State Management
     mutating func handleEscape() {
-        drawingState = nil
-        initialHitTargetForMerge = nil
+        if case .drawing = state { state = .idle }
+    }
+
+    mutating func handleReturn() -> CanvasToolResult {
+        if case .drawing = state {
+            state = .idle
+            return .schematicModified
+        }
+        return .noResult
     }
 
     mutating func handleBackspace() {
-        guard var currentDrawing = drawingState else { return }
-
-        // Can't undo if we only have the starting point.
-        guard currentDrawing.vertexHistory.count > 1 else {
-            drawingState = nil
-            initialHitTargetForMerge = nil
-            return
-        }
-
-        let vertexToRemoveID = currentDrawing.vertexHistory.removeLast()
-        currentDrawing.graph.removeVertex(id: vertexToRemoveID)
-        
-        // If the graph becomes empty, reset.
-        if currentDrawing.vertexHistory.isEmpty {
-            drawingState = nil
-            initialHitTargetForMerge = nil
-        } else {
-            self.drawingState = currentDrawing
-        }
+        // TODO: Implement backspace
     }
-
-    mutating func handleReturn() -> CanvasElement? {
-        guard let drawingState = drawingState, !drawingState.graph.edges.isEmpty else {
-            self.drawingState = nil
-            self.initialHitTargetForMerge = nil
-            return nil
-        }
-        let graph = drawingState.graph
-        graph.simplifyCollinearSegments()
-        let finalElement = ConnectionElement(graph: graph)
-        self.drawingState = nil
-        // Don't reset initialHitTargetForMerge here; the controller needs it.
-        return .connection(finalElement)
-    }
-
-    // MARK: – Equatable & Hashable
-    static func == (lhs: ConnectionTool, rhs: ConnectionTool) -> Bool { lhs.id == rhs.id }
-    func hash(into h: inout Hasher) { h.combine(id) }
-
+    
     // MARK: - Private Helpers
-    private func addOrthogonalSegment(to graph: ConnectionGraph, from p1: CGPoint, to p2: CGPoint, givenOrientation: LineOrientation? = nil) -> [ConnectionVertex.ID] {
-        var newVertexIDs: [UUID] = []
-        let startVertex = graph.ensureVertex(at: p1)
-
-        // If start and end points are the same, do nothing.
-        if p1 == p2 {
-            return []
+    
+    /// Gets or creates a vertex in the graph, using pin information if available.
+    private func getOrCreateVertex(at point: CGPoint, from target: CanvasHitTarget?, in graph: SchematicGraph) -> UUID {
+        if let target = target, case .canvasElement(let part) = target, case .pin(let pinID, let symbolID, _) = part {
+            // This is a pin, so create a special vertex for it.
+            return graph.getOrCreatePinVertex(at: point, symbolID: symbolID!, pinID: pinID)
+        } else {
+            // This is a free point or a junction on an existing wire.
+            return graph.getOrCreateVertex(at: point)
+        }
+    }
+    
+    /// Determines the initial drawing direction based on the object under the cursor.
+    private func determineInitialDirection(from hitTarget: CanvasHitTarget?) -> DrawingDirection {
+        guard let hitTarget = hitTarget else {
+            // Default to horizontal when starting in an empty space.
+            return .horizontal
         }
 
-        let lastSegmentOrientation = givenOrientation ?? graph.lastSegmentOrientation(before: startVertex.id)
-        let startsWithHorizontal = (lastSegmentOrientation == .vertical || lastSegmentOrientation == nil)
-
-        let cornerPoint = startsWithHorizontal ? CGPoint(x: p2.x, y: p1.y) : CGPoint(x: p1.x, y: p2.y)
-
-        // First segment: from p1 to cornerPoint
-        if cornerPoint != p1 {
-            let cornerVertex = graph.ensureVertex(at: cornerPoint)
-            graph.addEdge(from: startVertex.id, to: cornerVertex.id)
-            if !newVertexIDs.contains(cornerVertex.id) {
-                newVertexIDs.append(cornerVertex.id)
-            }
+        // 1. Check if the hit target is a connection, specifically an edge.
+        guard case .connection(let part) = hitTarget,
+              case .edge(_, _, let orientation) = part else {
+            // Default to horizontal for vertices, canvas elements, etc.
+            return .horizontal
         }
 
-        // Second segment: from cornerPoint to p2
-        if cornerPoint != p2 {
-            let cornerVertex = graph.ensureVertex(at: cornerPoint)
-            let endVertex = graph.ensureVertex(at: p2)
-            graph.addEdge(from: cornerVertex.id, to: endVertex.id)
-            if !newVertexIDs.contains(endVertex.id) {
-                newVertexIDs.append(endVertex.id)
-            }
+        // 2. Use the edge's orientation to set the next drawing direction.
+        switch orientation {
+        case .horizontal:
+            // Start drawing vertically from a horizontal edge.
+            return .vertical
+        case .vertical:
+            // Start drawing horizontally from a vertical edge.
+            return .horizontal
         }
-
-        return newVertexIDs
     }
 }

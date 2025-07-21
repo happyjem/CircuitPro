@@ -12,7 +12,8 @@ struct CanvasToolContext {
     var existingPadCount: Int = 0
     var selectedLayer: CanvasLayer = .layer0
     var magnification: CGFloat = 1.0
-    var hitTarget: ConnectionHitTarget?
+    var hitTarget: CanvasHitTarget?
+    var schematicGraph: SchematicGraph?
     /// Number of consecutive clicks at the current location (for double-tap detection).
     var clickCount: Int = 1
 }

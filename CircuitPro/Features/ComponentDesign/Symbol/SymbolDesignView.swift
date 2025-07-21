@@ -13,7 +13,7 @@ struct SymbolDesignView: View {
         @Bindable var bindableComponentDesignManager = componentDesignManager
 
         CanvasView(
-            manager: canvasManager,
+            manager: canvasManager, schematicGraph: .init(),
             elements: $bindableComponentDesignManager.symbolElements,
             selectedIDs: $bindableComponentDesignManager.selectedSymbolElementIDs,
             selectedTool: $bindableComponentDesignManager.selectedSymbolTool
