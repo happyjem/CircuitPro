@@ -7,7 +7,7 @@
 
 import AppKit
 
-final class HandleDragGesture: DragGesture {
+final class HandleDragGesture: CanvasDragGesture {
 
     unowned let workbench: WorkbenchView
     private var active: (UUID, Handle.Kind)?
@@ -38,6 +38,7 @@ final class HandleDragGesture: DragGesture {
         guard let (id, kind) = active else { return }
         var updated = workbench.elements
         let snapped = workbench.snap(p)
+        
         for i in updated.indices where updated[i].id == id {
             updated[i].updateHandle(kind, to: snapped, opposite: frozenOppositeWorld)
             workbench.elements = updated

@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import UniformTypeIdentifiers
 
 final class WorkbenchView: NSView {
 
@@ -83,27 +84,15 @@ final class WorkbenchView: NSView {
         didSet { crosshairsView?.crosshairsStyle = crosshairsStyle }
     }
 
-    var paperSize: PaperSize = .iso(.a4) {
-        didSet {
-            sheetView?.sheetSize = paperSize
-            layout.refreshSheetSize()
-        }
-    }
+    var paperSize: PaperSize = .iso(.a4)
 
-    var sheetOrientation: PaperOrientation = .landscape {
-        didSet {
-            sheetView?.orientation = sheetOrientation
-            layout.refreshSheetSize()
-        }
-    }
+    var sheetOrientation: PaperOrientation = .landscape
 
     var sheetCellValues: [String:String] = [:] {
         didSet { sheetView?.cellValues = sheetCellValues }
     }
 
-    var showDrawingSheet: Bool = false {
-        didSet { sheetView?.isHidden = !showDrawingSheet }
-    }
+    
 
     // MARK: Callbacks
     var onUpdate:          (([CanvasElement]) -> Void)?
@@ -111,6 +100,7 @@ final class WorkbenchView: NSView {
     var onPrimitiveAdded:  ((UUID, CanvasLayer) -> Void)?
     var onMouseMoved:      ((CGPoint)        -> Void)?
     var onPinHoverChange:  ((UUID?)          -> Void)?
+    var onComponentDropped: ((TransferableComponent, CGPoint) -> Void)?
 
     // MARK: Controllers
     lazy var layout     = WorkbenchLayoutController(host: self)
@@ -120,17 +110,23 @@ final class WorkbenchView: NSView {
     var isRotating: Bool { input.isRotating }
 
     // MARK: NSView overrides
-    override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
     // MARK: Init
     override init(frame: NSRect) {
         super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.cgColor
+        
+        self.registerForDraggedTypes([.transferableComponent])
+        
         _ = layout
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.cgColor
         _ = layout
     }
 
@@ -167,9 +163,28 @@ final class WorkbenchView: NSView {
                     isEnabled: isSnappingEnabled)
     }
     
-    /// Ensures the schematic graph has vertices for every symbol pin and that their
-    /// positions are up-to-date.
+    /// Ensures the schematic graph has vertices for every symbol pin, that their
+    /// positions are up-to-date, and that vertices for deleted symbols are removed.
     private func syncPinPositionsToGraph() {
+        // 1. Get all symbol IDs currently on the workbench
+        let currentSymbolIDs = Set<UUID>(elements.compactMap {
+            guard case .symbol(let symbol) = $0 else { return nil }
+            return symbol.id
+        })
+
+        // 2. Find and remove vertices from the graph that belong to deleted symbols
+        let verticesToRemove = schematicGraph.vertices.values.filter { vertex in
+            if case .pin(let symbolID, _) = vertex.ownership {
+                return !currentSymbolIDs.contains(symbolID)
+            }
+            return false
+        }
+        
+        if !verticesToRemove.isEmpty {
+            schematicGraph.delete(items: Set(verticesToRemove.map { $0.id }))
+        }
+
+        // 3. Update existing pins and add new ones
         for element in elements {
             guard case .symbol(let symbolElement) = element else { continue }
             
@@ -200,4 +215,17 @@ final class WorkbenchView: NSView {
     // old public helpers (still used by all gesture classes)
     func snap(_ p: CGPoint) -> CGPoint    { snapService.snap(p) }
     func snapDelta(_ v: CGFloat) -> CGFloat { snapService.snapDelta(v) }
+    
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        input.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        input.draggingUpdated(sender)
+    }
+    
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        input.performDragOperation(sender)
+    }
+
 }

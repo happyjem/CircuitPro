@@ -15,10 +15,13 @@ final class CanvasManager {
     var gridSpacing: GridSpacing = .mm1
     var scrollOrigin: CGPoint = .zero
 
-    var showDrawingSheet: Bool = true
-    var paperSize: PaperSize = .iso(.a5)
+    var paperSize: PaperSize = .iso(.a4)
 
-    var mouseLocation: CGPoint = CGPoint(x: 2500, y: 2500)
+    var mouseLocation: CGPoint = .zero
+    
+    var mouseLocationInMM: CGPoint {
+        mouseLocation / 10
+    }
 
     var enableSnapping: Bool = true
     var enableAxesBackground: Bool = true
@@ -27,13 +30,6 @@ final class CanvasManager {
     var backgroundStyle: CanvasBackgroundStyle = .dotted
 
     var showComponentDrawer: Bool = false
-
-    var relativeMousePosition: CGPoint {
-        CGPoint(
-            x: mouseLocation.x - 2500,
-            y: normalize(-(mouseLocation.y - 2500))
-        )
-    }
 
     func snap(_ point: CGPoint) -> CGPoint {
         guard enableSnapping else { return point }
