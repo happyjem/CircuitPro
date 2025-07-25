@@ -19,13 +19,14 @@ final class WorkbenchView: NSView {
     weak var handlesView:    HandlesView?
     weak var marqueeView:    MarqueeView?
     weak var crosshairsView: CrosshairsView?
+    weak var guideView:      GuideView?
 
     // MARK: Model / view-state
     var elements: [CanvasElement] = [] {
         didSet {
             elementsView?.elements  = elements
             handlesView?.elements   = elements
-            previewView?.needsDisplay = true
+    
             
             // Update the schematic graph with new pin positions
             syncPinPositionsToGraph()
@@ -54,12 +55,15 @@ final class WorkbenchView: NSView {
     }
 
     var selectedTool: AnyCanvasTool? {
-        didSet { previewView?.selectedTool = selectedTool }
+        didSet {
+            previewView?.selectedTool = selectedTool
+            if window?.firstResponder != self {
+                window?.makeFirstResponder(self)
+            }
+        }
     }
 
-    var selectedLayer: CanvasLayer = .layer0 {
-        didSet { previewView?.needsDisplay = true }
-    }
+    var selectedLayer: CanvasLayer = .layer0
 
     var magnification: CGFloat = 1.0 {
         didSet {
@@ -70,6 +74,7 @@ final class WorkbenchView: NSView {
             previewView?.magnification    = magnification
             handlesView?.magnification    = magnification
             connectionsView?.magnification = magnification
+            guideView?.magnification      = magnification
         }
     }
 
@@ -77,6 +82,23 @@ final class WorkbenchView: NSView {
     var snapGridSize:      CGFloat = 10.0 {
         didSet {
             backgroundView?.unitSpacing = snapGridSize
+        }
+    }
+
+    var showGuides: Bool = false {
+        didSet {
+            guard showGuides != oldValue else { return }
+            
+            let origin = showGuides ? CGPoint(x: bounds.midX, y: bounds.midY) : .zero
+            
+            backgroundView?.gridOrigin = origin
+            
+            if let guideView = self.guideView {
+                guideView.isHidden = !showGuides
+                guideView.origin = showGuides ? origin : nil
+            }
+            
+            backgroundView?.needsLayout = true
         }
     }
 
@@ -140,13 +162,15 @@ final class WorkbenchView: NSView {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
         let area = NSTrackingArea(rect: bounds,
-                                  options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                  options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                   owner: self,
                                   userInfo: nil)
         addTrackingArea(area)
     }
 
     override func mouseMoved(with e: NSEvent)   { input.mouseMoved(e) }
+    override func mouseEntered(with e: NSEvent) { input.mouseMoved(e) }
+    override func mouseExited(with e: NSEvent)  { input.mouseExited() }
     override func mouseDown(with e: NSEvent)    { input.mouseDown(e) }
     override func mouseDragged(with e: NSEvent) { input.mouseDragged(e) }
     override func mouseUp(with e: NSEvent)      { input.mouseUp(e) }
@@ -159,8 +183,10 @@ final class WorkbenchView: NSView {
     func reset() { input.reset() }
 
     var snapService: SnapService {
-        SnapService(gridSize: snapGridSize,
-                    isEnabled: isSnappingEnabled)
+        let origin = showGuides ? CGPoint(x: bounds.midX, y: bounds.midY) : .zero
+        return SnapService(gridSize: snapGridSize,
+                           isEnabled: isSnappingEnabled,
+                           origin: origin)
     }
     
     /// Ensures the schematic graph has vertices for every symbol pin, that their
@@ -209,7 +235,6 @@ final class WorkbenchView: NSView {
                 }
             }
         }
-        connectionsView?.needsDisplay = true
     }
 
     // old public helpers (still used by all gesture classes)

@@ -16,7 +16,7 @@ struct Pad: Identifiable, Codable, Hashable {
     var id: UUID = UUID()
     var number: Int
     var position: CGPoint
-    var cardinalRotation: CardinalRotation = .deg0          // stored
+    var cardinalRotation: CardinalRotation = .west          // stored
     var shape: PadShape = .rect(width: 5, height: 10)
     var type: PadType = .surfaceMount
     var drillDiameter: Double?
@@ -89,24 +89,7 @@ extension Pad {
     var allPrimitives: [AnyPrimitive] { shapePrimitives + maskPrimitives }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// MARK: - Drawable & Hittable
-// ═══════════════════════════════════════════════════════════════════════
-extension Pad: Hittable {
-
-    func hitTest(_ point: CGPoint, tolerance: CGFloat) -> CanvasHitTarget? {
-        for primitive in allPrimitives {
-            if primitive.hitTest(point, tolerance: tolerance) != nil {
-                return .canvasElement(part: .pad(id: id, position: position))
-            }
-        }
-        return nil
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 // MARK: - Convenience computed properties (width / height / radius)
-// ═══════════════════════════════════════════════════════════════════════
 extension Pad {
 
     var isCircle: Bool {

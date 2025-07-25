@@ -18,24 +18,42 @@ protocol GraphicPrimitive:
     func makePath() -> CGPath
 }
 
-extension GraphicPrimitive {
-    // body drawing stays exactly like today
-    func drawBody(in ctx: CGContext) {
-        let path = makePath()
-
-        if filled {
-            ctx.setFillColor(color.cgColor)
-            ctx.addPath(path)
-            ctx.fillPath()
-        } else {
-            ctx.setStrokeColor(color.cgColor)
-            ctx.setLineWidth(strokeWidth)
-            ctx.setLineCap(.round)
-            ctx.addPath(path)
-            ctx.strokePath()
-        }
+// MARK: - Drawable Conformance
+extension Drawable where Self: GraphicPrimitive {
+    
+    func makeBodyParameters() -> [DrawingParameters] {
+        let params = DrawingParameters(
+            path: makePath(),
+            lineWidth: filled ? 0.0 : strokeWidth, // No stroke if filled
+            fillColor: filled ? color.cgColor : nil,
+            strokeColor: filled ? nil : color.cgColor,
+            lineCap: .round,
+            lineJoin: .round
+        )
+        return [params]
     }
 
+    func makeHaloParameters() -> DrawingParameters? {
+        let haloWidth: CGFloat = 4.0
+        
+        let haloColor = self.color.cgColor.copy(alpha: 0.3) ?? NSColor.systemBlue.withAlphaComponent(0.3).cgColor
+        let path = makePath()
+        guard !path.isEmpty else { return nil }
+        
+        return DrawingParameters(
+            path: path,
+            lineWidth: haloWidth,
+            fillColor: nil,
+            strokeColor: haloColor
+        )
+    }
+}
+
+// MARK: - Other Shared Implementations
+extension GraphicPrimitive {
+
+    // The old drawBody(in:) method has been REMOVED from here.
+    
     func hitTest(_ point: CGPoint, tolerance: CGFloat = 5) -> CanvasHitTarget? {
         let path = makePath()
         let wasHit: Bool
@@ -55,18 +73,12 @@ extension GraphicPrimitive {
     }
 
     var boundingBox: CGRect {
-        // 3.1 Base geometry
         var box = makePath().boundingBoxOfPath
 
-        // 3.2 Include stroke thickness when outline only
         if !filled {
             let inset = -strokeWidth / 2
             box = box.insetBy(dx: inset, dy: inset)
         }
         return box
     }
-}
-
-extension Drawable where Self: GraphicPrimitive {
-    func selectionPath() -> CGPath? { makePath() }
 }

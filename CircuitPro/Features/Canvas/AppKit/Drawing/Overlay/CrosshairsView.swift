@@ -1,61 +1,71 @@
 import AppKit
 
-final class CrosshairsView: NSView {
+/// A vector-based crosshairs overlay.
+final class CrosshairsView: CanvasOverlayView {
 
+    // MARK: - API
+    
+    /// The visual style of the crosshairs.
+    /// The overlay is re-drawn when the style changes.
     var crosshairsStyle: CrosshairsStyle = .centeredCross {
-        didSet { needsDisplay = true }
+        didSet {
+            guard crosshairsStyle != oldValue else { return }
+            updateDrawing()
+        }
     }
 
+    /// The center point for the crosshairs, specified in view coordinates (y-down).
+    /// If `nil`, the crosshairs are not drawn.
     var location: CGPoint? {
-        didSet { needsDisplay = true }
+        didSet {
+            guard location != oldValue else { return }
+            updateDrawing()
+        }
     }
 
-    var magnification: CGFloat = 1.0 {
-        didSet { needsDisplay = true }
-    }
+    // MARK: - Drawing
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        ctx.saveGState()
-        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
-        ctx.setLineWidth(1.0 / magnification)
-
-        switch crosshairsStyle {
-        case .hidden:
-            return  // draw nothing
-
-        case .fullScreenLines:
-            guard let point = location else { return }
-            ctx.beginPath()
-            ctx.move(to: CGPoint(x: point.x, y: 0))
-            ctx.addLine(to: CGPoint(x: point.x, y: bounds.height))
-            ctx.move(to: CGPoint(x: 0, y: point.y))
-            ctx.addLine(to: CGPoint(x: bounds.width, y: point.y))
-            ctx.strokePath()
-
-        case .centeredCross:
-            guard let point = location else { return }
-            let size: CGFloat = 20.0
-            let half = size / 2
-            ctx.setLineCap(.round)
-            ctx.beginPath()
-            ctx.move(to: CGPoint(x: point.x - half, y: point.y))
-            ctx.addLine(to: CGPoint(x: point.x + half, y: point.y))
-            ctx.move(to: CGPoint(x: point.x, y: point.y - half))
-            ctx.addLine(to: CGPoint(x: point.x, y: point.y + half))
-            ctx.strokePath()
+    /// Constructs the drawing parameters for the crosshairs path.
+    override func makeDrawingParameters() -> DrawingParameters? {
+        // 1. Validate state
+        // Ensure the style is not hidden and a valid location is provided.
+        guard crosshairsStyle != .hidden, let point = location else {
+            return nil
         }
 
-        ctx.restoreGState()
+        // 2. Create path based on style
+        let path = CGMutablePath()
+        switch crosshairsStyle {
+        case .fullScreenLines:
+            // Create two lines that span the entire view bounds and intersect at the point.
+            path.move(to: CGPoint(x: point.x, y: bounds.minY))
+            path.addLine(to: CGPoint(x: point.x, y: bounds.maxY))
+            path.move(to: CGPoint(x: bounds.minX, y: point.y))
+            path.addLine(to: CGPoint(x: bounds.maxX, y: point.y))
+
+        case .centeredCross:
+            // Create a small cross shape centered at the point.
+            let size: CGFloat = 20.0
+            let half = size / 2.0
+            path.move(to: CGPoint(x: point.x - half, y: point.y))
+            path.addLine(to: CGPoint(x: point.x + half, y: point.y))
+            path.move(to: CGPoint(x: point.x, y: point.y - half))
+            path.addLine(to: CGPoint(x: point.x, y: point.y + half))
+
+        case .hidden:
+            // This case is handled by the initial guard.
+            break
+        }
+
+        // 3. Return drawing parameters
+        // The line width is set to a base of 1.0; the superclass will handle scaling.
+        // There is no fill, only a stroke.
+        return DrawingParameters(
+            path: path,
+            lineWidth: 1.0,
+            fillColor: nil,
+            strokeColor: NSColor.systemBlue.cgColor,
+            lineCap: .round
+        )
     }
 }

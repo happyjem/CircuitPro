@@ -32,16 +32,17 @@ struct RectangleTool: CanvasTool {
         }
     }
 
-    mutating func drawPreview(in ctx: CGContext, mouse: CGPoint, context: CanvasToolContext) {
-        guard let start else { return }
+    mutating func preview(mouse: CGPoint, context: CanvasToolContext) -> [DrawingParameters] {
+        guard let start else { return [] }
         let rect = CGRect(origin: start, size: .zero).union(CGRect(origin: mouse, size: .zero))
+        let path = CGPath(rect: rect, transform: nil)
 
-        ctx.saveGState()
-        ctx.setStrokeColor(NSColor(context.selectedLayer.color).cgColor)
-        ctx.setLineWidth(1)
-        ctx.setLineDash(phase: 0, lengths: [4])
-        ctx.stroke(rect)
-        ctx.restoreGState()
+        return [DrawingParameters(
+            path: path,
+            lineWidth: 1.0,
+            strokeColor: NSColor(context.selectedLayer.color).cgColor,
+            lineDashPattern: [4, 4]
+        )]
     }
 
     mutating func handleEscape() {

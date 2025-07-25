@@ -7,33 +7,46 @@
 
 import AppKit
 
-final class MarqueeView: NSView {
+/// Vector-based selection marquee that draws a dashed rectangle.
+final class MarqueeView: CanvasOverlayView {
 
-    // The selection rectangle in *world* coordinates.
-    var rect: CGRect? {                    // ← set from the interaction controller
-        didSet { needsDisplay = true }
+    // MARK: - API
+    
+    /// Selection rectangle in view coordinates (y-down).
+    /// The overlay is hidden if this is `nil`.
+    var rect: CGRect? {
+        didSet {
+            guard rect != oldValue else { return }
+            updateDrawing()
+        }
     }
 
-    // Current zoom factor (1 / magnification is used to keep the stroke 1-pixel wide).
-    var magnification: CGFloat = 1 {
-        didSet { needsDisplay = true }
-    }
+    // MARK: - Drawing
 
-    // Same coordinate system as the main canvas.
-    override var isOpaque: Bool { false }   // overlay must stay transparent
+    /// Provides the drawing data for the selection marquee.
+    override func makeDrawingParameters() -> DrawingParameters? {
+        // 1. Check for a valid rectangle
+        guard let rect else { return nil }
 
-    override func draw(_ dirty: NSRect) {
-        guard let rect = rect else { return }
+        // 2. Create the path from the rectangle
+        let path = CGPath(rect: rect, transform: nil)
 
-        let scale     = 1 / magnification
-        let ctx       = NSGraphicsContext.current!.cgContext
+        // 3. Configure drawing parameters
+        let fillColor = NSColor.systemBlue.withAlphaComponent(0.1).cgColor
+        let strokeColor = NSColor.systemBlue.cgColor
+        let dashPattern: [NSNumber] = [4, 2]
 
-        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
-        ctx.setFillColor(NSColor.systemBlue.withAlphaComponent(0.1).cgColor)
-        ctx.setLineWidth(1 * scale)
-        ctx.setLineDash(phase: 0, lengths: [4 * scale, 2 * scale])
-
-        ctx.addRect(rect)
-        ctx.drawPath(using: .fillStroke)
+        // 4. Return parameters
+        // The lineWidth is set to a base of 1.0; the superclass will scale it
+        // correctly based on the current magnification level.
+        return DrawingParameters(
+            path: path,
+            lineWidth: 1.0,
+            fillColor: fillColor,
+            strokeColor: strokeColor,
+            lineDashPattern: dashPattern,
+            lineCap: .butt,
+            lineJoin: .miter
+        )
     }
 }

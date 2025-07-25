@@ -125,6 +125,10 @@ struct ComponentDesignView: View {
                 .help("Send Feedback")
             }
         }
+        .onAppear {
+            symbolCanvasManager.showGuides = true
+            footprintCanvasManager.showGuides = true
+        }
         .alert("Error", isPresented: $showError, actions: {
           Button("OK", role: .cancel) { }
         }, message: {
@@ -165,7 +169,8 @@ struct ComponentDesignView: View {
             return
         }
 
-        let anchor = CGPoint(x: 2_500, y: 2_500)
+        let canvasSize = symbolCanvasManager.paperSize.canvasSize(orientation: .landscape)
+        let anchor = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
 
         let rawPrimitives: [AnyPrimitive] = 
             componentDesignManager.symbolElements.compactMap {

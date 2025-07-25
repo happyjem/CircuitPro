@@ -54,7 +54,11 @@ final class WorkbenchInputCoordinator {
 
         // Preview & live rotation
         rotation.update(to: p)
-        workbench.previewView?.needsDisplay = true
+        workbench.previewView?.updateMouseLocation(to: p)
+    }
+
+    func mouseExited() {
+        workbench.crosshairsView?.location = nil
     }
 
     // MARK: – Mouse-down
@@ -98,12 +102,14 @@ final class WorkbenchInputCoordinator {
 
             } else {
                 // Empty space or a non-selectable element was hit.
-                // Clear selection and start marquee.
-                if !workbench.selectedIDs.isEmpty {
-                    workbench.selectedIDs.removeAll()
-                    workbench.onSelectionChange?(workbench.selectedIDs)
+                // Clear selection (if shift isn't held) and start marquee.
+                if !e.modifierFlags.contains(.shift) {
+                    if !workbench.selectedIDs.isEmpty {
+                        workbench.selectedIDs.removeAll()
+                        workbench.onSelectionChange?(workbench.selectedIDs)
+                    }
                 }
-                marquee.begin(at: p)
+                marquee.begin(at: p, event: e)
                 return
             }
         }
@@ -131,8 +137,6 @@ final class WorkbenchInputCoordinator {
         activeDrag?.end()
         activeDrag = nil
 
-        workbench.elementsView?.needsDisplay = true
-        workbench.handlesView?.needsDisplay  = true
     }
 
     // MARK: – Called by the key-command helper
@@ -150,12 +154,12 @@ final class WorkbenchInputCoordinator {
             workbench.elements.append(newElement)
             workbench.onUpdate?(workbench.elements)
         case .schematicModified:
-            workbench.connectionsView?.needsDisplay = true
+            break
         case .noResult:
             break
         }
         workbench.selectedTool = tool
-        workbench.previewView?.needsDisplay = true
+        
     }
 
     func deleteSelectedElements() {
@@ -171,7 +175,7 @@ final class WorkbenchInputCoordinator {
         workbench.onUpdate?(workbench.elements)
         
         // Force a redraw of the connections.
-        workbench.connectionsView?.needsDisplay = true
+        
     }
 
     // MARK: – Public reset
@@ -247,6 +251,7 @@ extension WorkbenchInputCoordinator {
             let pointInView = workbench.convert(sender.draggingLocation, from: nil)
             
             workbench.onComponentDropped?(component, pointInView)
+            workbench.window?.makeFirstResponder(workbench)
             
             return true
 
