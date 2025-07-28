@@ -171,19 +171,48 @@ struct ComponentDesignView: View {
 
         let canvasSize = symbolCanvasManager.paperSize.canvasSize(orientation: .landscape)
         let anchor = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        var handledElementIDs = Set<UUID>()
 
-        let rawPrimitives: [AnyPrimitive] = 
-            componentDesignManager.symbolElements.compactMap {
-                if case .primitive(let primitive) = $0 { return primitive }
+        // 1. Process all text elements to create anchored text definitions.
+        var textDefinitions = [AnchoredTextDefinition]()
+        let textCanvasElements = componentDesignManager.symbolElements.compactMap { element -> TextElement? in
+            guard case .text(let textElement) = element else { return nil }
+            return textElement
+        }
+
+        for textElement in textCanvasElements {
+            let relativePosition = CGPoint(x: textElement.position.x - anchor.x, y: textElement.position.y - anchor.y)
+            let source: TextSource
+
+            if textElement.id == componentDesignManager.abbreviationTextElementID {
+                source = .dynamic(.reference)
+            } else {
+                source = .static(textElement.text)
+            }
+            
+            textDefinitions.append(AnchoredTextDefinition(
+                source: source,
+                relativePosition: relativePosition
+            ))
+            handledElementIDs.insert(textElement.id)
+        }
+        
+        // 2. Process primitives, excluding any elements that have already been handled.
+        let rawPrimitives: [AnyPrimitive] =
+            componentDesignManager.symbolElements.compactMap { element in
+                guard !handledElementIDs.contains(element.id) else { return nil }
+                if case .primitive(let primitive) = element { return primitive }
                 return nil
             }
-        let rawPins = componentDesignManager.pins
 
         let primitives = rawPrimitives.map { prim -> AnyPrimitive in
             var copy = prim
             copy.translate(by: CGVector(dx: -anchor.x, dy: -anchor.y))
             return copy
         }
+
+        // 3. Process pins (unchanged)
+        let rawPins = componentDesignManager.pins
         let pins = rawPins.map { pin -> Pin in
             var copy = pin
             copy.translate(by: CGVector(dx: -anchor.x, dy: -anchor.y))
@@ -197,14 +226,15 @@ struct ComponentDesignView: View {
             footprints: [],
             category: componentDesignManager.selectedCategory,
             package: componentDesignManager.selectedPackageType,
-            properties: componentDesignManager.componentProperties
+            propertyDefinitions: componentDesignManager.componentProperties
         )
 
         let newSymbol = Symbol(
             name: componentDesignManager.componentName,
             component: newComponent,
             primitives: primitives,
-            pins: pins
+            pins: pins,
+            anchoredTextDefinitions: textDefinitions
         )
 
         newComponent.symbol = newSymbol
