@@ -10,7 +10,7 @@ import CoreGraphics
 import AppKit
 
 /// A type-erased wrapper so we can store heterogeneous primitives in one array.
-enum AnyPrimitive: GraphicPrimitive {
+enum AnyPrimitive: GraphicPrimitive, Identifiable, Hashable {
 
     case line(LinePrimitive)
     case rectangle(RectanglePrimitive)
@@ -119,6 +119,26 @@ enum AnyPrimitive: GraphicPrimitive {
         }
     }
 
+    var size: CGSize {
+        switch self {
+        case .rectangle(let rectangle):
+            return rectangle.size
+        case .circle(let circle):
+            return CGSize(width: circle.radius * 2, height: circle.radius * 2)
+        case .line(let line):
+            let width = abs(line.end.x - line.start.x)
+            let height = abs(line.end.y - line.start.y)
+            return CGSize(width: width, height: height)
+        }
+    }
+
+    var snapsToCenter: Bool {
+        switch self {
+        case .rectangle: return false // uses corner snapping
+        case .line, .circle: return true // uses center snapping
+        }
+    }
+
     func handles() -> [Handle] {
         switch self {
         case .line(let line): return line.handles()
@@ -139,6 +159,32 @@ enum AnyPrimitive: GraphicPrimitive {
             rectangle.updateHandle(kind, to: newPos, opposite: opp); self = .rectangle(rectangle)
         case .circle(var circle):
             circle.updateHandle(kind, to: newPos, opposite: opp); self = .circle(circle)
+        }
+    }
+}
+
+extension AnyPrimitive {
+    var displayName: String {
+        switch self {
+        case .rectangle:
+            "Rectangle"
+        case .circle:
+            "Circle"
+        case .line:
+            "Line"
+        }
+    }
+}
+
+extension AnyPrimitive {
+    var symbol: String {
+        switch self {
+        case .rectangle:
+            CircuitProSymbols.Graphic.rectangle
+        case .circle:
+            CircuitProSymbols.Graphic.circle
+        case .line:
+            CircuitProSymbols.Graphic.line
         }
     }
 }

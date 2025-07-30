@@ -12,9 +12,9 @@ import Observation
 final class ComponentDesignManager {
 
     var componentName: String = "" { didSet { refreshValidation() } }
-    var componentAbbreviation: String = "" {
+    var referenceDesignatorPrefix: String = "" {
         didSet {
-            updateAbbreviationTextElement()
+            updateReferenceDesignatorPrefixTextElement()
             refreshValidation()
         }
     }
@@ -36,7 +36,7 @@ final class ComponentDesignManager {
     var selectedSymbolElementIDs: Set<UUID> = []
     var selectedSymbolTool: AnyCanvasTool = AnyCanvasTool(CursorTool())
     private var symbolElementIndexMap: [UUID: Int] = [:]
-    private(set) var abbreviationTextElementID: UUID?
+    private(set) var referenceDesignatorPrefixTextElementID: UUID?
 
     // MARK: - Footprint
     var footprintElements: [CanvasElement] = [] {
@@ -52,16 +52,16 @@ final class ComponentDesignManager {
     var selectedFootprintLayer: CanvasLayer? = .layer0
     var layerAssignments: [UUID: CanvasLayer] = [:]
     
-    // MARK: Abbreviation Text Element Handling
-    private func updateAbbreviationTextElement() {
-        // 1. Check if an abbreviation text element already exists.
-        if let elementID = abbreviationTextElementID,
+    // MARK: RefDes Text Element Handling
+    private func updateReferenceDesignatorPrefixTextElement() {
+        // 1. Check if an referenceDesignatorPrefix text element already exists.
+        if let elementID = referenceDesignatorPrefixTextElementID,
            let index = symbolElementIndexMap[elementID] {
             
-            // If the new abbreviation is empty, remove the element.
-            if componentAbbreviation.isEmpty {
+            // If the new referenceDesignatorPrefix is empty, remove the element.
+            if referenceDesignatorPrefix.isEmpty {
                 symbolElements.remove(at: index)
-                abbreviationTextElementID = nil
+                referenceDesignatorPrefixTextElementID = nil
                 return
             }
 
@@ -69,24 +69,24 @@ final class ComponentDesignManager {
             guard case .text(var textElement) = symbolElements[index] else {
                 // This case should ideally not happen if our ID logic is correct.
                 // We'll reset the ID and create a new element to be safe.
-                abbreviationTextElementID = nil
-                if !componentAbbreviation.isEmpty { createAbbreviationTextElement() }
+                referenceDesignatorPrefixTextElementID = nil
+                if !referenceDesignatorPrefix.isEmpty { createReferenceDesignatorPrefixTextElement() }
                 return
             }
             
-            textElement.text = componentAbbreviation
+            textElement.text = referenceDesignatorPrefix
             symbolElements[index] = .text(textElement)
 
-        } else if !componentAbbreviation.isEmpty {
-            // 2. If no element exists and the abbreviation is not empty, create one.
-            createAbbreviationTextElement()
+        } else if !referenceDesignatorPrefix.isEmpty {
+            // 2. If no element exists and the referenceDesignatorPrefix is not empty, create one.
+            createReferenceDesignatorPrefixTextElement()
         }
     }
 
-    private func createAbbreviationTextElement() {
+    private func createReferenceDesignatorPrefixTextElement() {
         // 1. By default, the symbol canvas uses A4 paper in landscape.
-        let defaultPaper = PaperSize.iso(.a4)
-        let canvasSize = defaultPaper.canvasSize(orientation: .landscape)
+        let defaultPaper = PaperSize.component
+        let canvasSize = defaultPaper.canvasSize()
 
         // 2. Calculate the center point of this default canvas.
         let centerPoint = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
@@ -94,10 +94,10 @@ final class ComponentDesignManager {
         // 3. Create the text element at the center.
         let newElement = TextElement(
             id: UUID(),
-            text: componentAbbreviation,
+            text: referenceDesignatorPrefix,
             position: centerPoint
         )
-        abbreviationTextElementID = newElement.id
+        referenceDesignatorPrefixTextElementID = newElement.id
         symbolElements.append(.text(newElement))
     }
 
@@ -117,7 +117,7 @@ final class ComponentDesignManager {
     func resetAll() {
         // 1. Component metadata
         componentName = ""
-        componentAbbreviation = ""
+        referenceDesignatorPrefix = ""
         selectedCategory = nil
         selectedPackageType = nil
         componentProperties = [
@@ -128,7 +128,7 @@ final class ComponentDesignManager {
         symbolElements = []
         selectedSymbolElementIDs = []
         selectedSymbolTool = AnyCanvasTool(CursorTool())
-        abbreviationTextElementID = nil // Reset the tracked ID
+        referenceDesignatorPrefixTextElementID = nil // Reset the tracked ID
 
         // 3. Footprint design
         footprintElements = []
@@ -228,9 +228,9 @@ extension ComponentDesignManager {
         return Binding<Pin>(
             get: {
                 guard let index = self.symbolElementIndexMap[id],
-                      case .pin(let pin) = self.symbolElements[safe: index]
+                      case .pin(let currentPin) = self.symbolElements[safe: index]
                 else { return pin }
-                return pin
+                return currentPin
             },
             set: { newValue in
                 if let index = self.symbolElementIndexMap[id],
@@ -271,14 +271,104 @@ extension ComponentDesignManager {
         return Binding<Pad>(
             get: {
                 guard let index = self.footprintElementIndexMap[id],
-                      case .pad(let pad) = self.footprintElements[safe: index]
+                      case .pad(let currentPad) = self.footprintElements[safe: index]
                 else { return pad }
-                return pad
+                return currentPad
             },
             set: { newValue in
                 if let index = self.footprintElementIndexMap[id],
                    self.footprintElements.indices.contains(index) {
                     self.footprintElements[index] = .pad(newValue)
+                }
+            }
+        )
+    }
+}
+
+// MARK: - Symbol primitives
+extension ComponentDesignManager {
+    var symbolPrimitives: [AnyPrimitive] {
+        symbolElements.compactMap {
+            if case .primitive(let prim) = $0 { return prim }
+            return nil
+        }
+    }
+
+    var selectedSymbolPrimitives: [AnyPrimitive] {
+        symbolElements.compactMap {
+            if case .primitive(let prim) = $0,
+               selectedSymbolElementIDs.contains(prim.id) { return prim }
+            return nil
+        }
+    }
+
+    func bindingForPrimitive(with id: UUID) -> Binding<AnyPrimitive>? {
+        guard let index = symbolElementIndexMap[id],
+              case .primitive(let prim) = symbolElements[safe: index] else { return nil }
+
+        return Binding(
+            get: {
+                guard let idx = self.symbolElementIndexMap[id],
+                      case .primitive(let p) = self.symbolElements[safe: idx] else { return prim }
+                return p
+            },
+            set: { newValue in
+                if let idx = self.symbolElementIndexMap[id],
+                   self.symbolElements.indices.contains(idx) {
+                    self.symbolElements[idx] = .primitive(newValue)
+                }
+            }
+        )
+    }
+}
+
+// MARK: - Footprint primitives
+extension ComponentDesignManager {
+    /// A computed property that filters and returns only the primitive elements from the footprint.
+    var footprintPrimitives: [AnyPrimitive] {
+        footprintElements.compactMap {
+            if case .primitive(let prim) = $0 {
+                return prim
+            }
+            return nil
+        }
+    }
+
+    /// A computed property that returns the currently selected primitives from the footprint.
+    var selectedFootprintPrimitives: [AnyPrimitive] {
+        footprintElements.compactMap {
+            if case .primitive(let prim) = $0, selectedFootprintElementIDs.contains(prim.id) {
+                return prim
+            }
+            return nil
+        }
+    }
+
+    /// Creates a `Binding` for a specific footprint primitive, allowing it to be modified by a SwiftUI view.
+    ///
+    /// - Parameter id: The `UUID` of the primitive to create a binding for.
+    /// - Returns: An optional `Binding<AnyPrimitive>`. Returns `nil` if the primitive isn't found.
+    func bindingForFootprintPrimitive(with id: UUID) -> Binding<AnyPrimitive>? {
+        guard let index = footprintElementIndexMap[id],
+              case .primitive(let prim) = footprintElements[safe: index] else {
+            return nil
+        }
+
+        return Binding(
+            get: {
+                // Safely get the latest version of the primitive on each access.
+                guard let idx = self.footprintElementIndexMap[id],
+                      case .primitive(let p) = self.footprintElements[safe: idx] else {
+                    // Return the captured 'prim' as a fallback.
+                    return prim
+                }
+                return p
+            },
+            set: { newValue in
+                // Safely update the element in the main array.
+                if let idx = self.footprintElementIndexMap[id],
+                   self.footprintElements.indices.contains(idx) {
+                    self.footprintElements[idx] = .primitive(newValue)
                 }
             }
         )

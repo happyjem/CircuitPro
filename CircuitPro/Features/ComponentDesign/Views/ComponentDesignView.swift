@@ -15,9 +15,9 @@ struct ComponentDesignView: View {
     @State private var symbolCanvasManager = CanvasManager()
     @State private var footprintCanvasManager = CanvasManager()
 
-    @State private var showError   = false
+    @State private var showError = false
     @State private var showWarning = false
-    @State private var messages    = [String]()
+    @State private var messages = [String]()
     @State private var didCreateComponent = false
     @State private var showFeedbackSheet: Bool = false
 
@@ -35,61 +35,11 @@ struct ComponentDesignView: View {
                 )
                 .navigationTitle("Component Designer")
             } else {
-                VStack {
-                    StageIndicatorView(
-                        currentStage: $currentStage,
-                        validationProvider: componentDesignManager.validationState
-                    )
-                    Spacer()
-                    StageContentView(
-                        left: {
-                            switch currentStage {
-                            case .footprint:
-                                LayerTypeListView()
-                                    .transition(.move(edge: .leading).combined(with: .blurReplace))
-                                    .padding()
-                            default:
-                                Color.clear
-                            }
-                        },
-                        center: {
-                            switch currentStage {
-                            case .component:
-                                ComponentDetailView()
-                            case .symbol:
-                                SymbolDesignView()
-                                    .environment(symbolCanvasManager)
-                            case .footprint:
-                                FootprintDesignView()
-                                    .environment(footprintCanvasManager)
-                            }
-                        },
-                        right: {
-                            switch currentStage {
-                            case .symbol:
-                                if componentDesignManager.pins.isNotEmpty {
-                                    PinEditorView()
-                                        .transition(.move(edge: .trailing).combined(with: .blurReplace))
-                                        .padding()
-                                } else {
-                                    Color.clear
-                                }
-                            case .footprint:
-                                if componentDesignManager.pads.isNotEmpty {
-                                    PadEditorView()
-                                        .transition(.move(edge: .trailing).combined(with: .blurReplace))
-                                        .padding()
-                                } else {
-                                    Color.clear
-                                }
-                            default:
-                                Color.clear
-                            }
-                        }
-                    )
-                    Spacer()
-                }
-                .padding()
+                ComponentDesignStageContainerView(
+                    currentStage: $currentStage,
+                    symbolCanvasManager: symbolCanvasManager,
+                    footprintCanvasManager: footprintCanvasManager
+                )
                 .navigationTitle("Component Designer")
                 .toolbar {
                     ToolbarItem {
@@ -102,7 +52,7 @@ struct ComponentDesignView: View {
                         .directionalPadding(vertical: 5, horizontal: 7.5)
                         .foregroundStyle(.white)
                         .background(Color.blue)
-                        .clipAndStroke(with: RoundedRectangle(cornerRadius: 5))
+                        .clipShape(.rect(cornerRadius: 5))
                     }
                 }
                 .onChange(of: componentDesignManager.componentProperties) {
@@ -128,6 +78,8 @@ struct ComponentDesignView: View {
         .onAppear {
             symbolCanvasManager.showGuides = true
             footprintCanvasManager.showGuides = true
+            symbolCanvasManager.paperSize = .component
+            footprintCanvasManager.paperSize = .component
         }
         .alert("Error", isPresented: $showError, actions: {
           Button("OK", role: .cancel) { }
@@ -184,7 +136,7 @@ struct ComponentDesignView: View {
             let relativePosition = CGPoint(x: textElement.position.x - anchor.x, y: textElement.position.y - anchor.y)
             let source: TextSource
 
-            if textElement.id == componentDesignManager.abbreviationTextElementID {
+            if textElement.id == componentDesignManager.referenceDesignatorPrefixTextElementID {
                 source = .dynamic(.reference)
             } else {
                 source = .static(textElement.text)
@@ -221,7 +173,7 @@ struct ComponentDesignView: View {
 
         let newComponent = Component(
             name: componentDesignManager.componentName,
-            abbreviation: componentDesignManager.componentAbbreviation,
+            referenceDesignatorPrefix: componentDesignManager.referenceDesignatorPrefix,
             symbol: nil,
             footprints: [],
             category: componentDesignManager.selectedCategory,

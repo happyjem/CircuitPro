@@ -29,26 +29,17 @@ struct CanvasView: NSViewRepresentable {
         let documentContainer = context.coordinator.documentContainer
 
         // Scroll view scaffolding
-        let scrollView = NSScrollView()
+        let scrollView = CenteringNSScrollView()
         scrollView.documentView = documentContainer
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = true
         scrollView.allowsMagnification = true
         scrollView.minMagnification = ZoomStep.minZoom
         scrollView.maxMagnification = ZoomStep.maxZoom
-        scrollView.magnification = manager.magnification        
+        scrollView.magnification = manager.magnification
         
         // Set a background color to create the "out of bounds" area
         scrollView.drawsBackground = false
-
-        // Initial setup
-        DispatchQueue.main.async {
-            let clip = scrollView.contentView.bounds.size
-            let doc = documentContainer.frame.size
-            let origin = NSPoint(x: (doc.width - clip.width) * 0.5, y: (doc.height - clip.height) * 0.5)
-            scrollView.contentView.scroll(to: origin)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
         
         scrollView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -94,6 +85,10 @@ struct CanvasView: NSViewRepresentable {
         workbench.snapGridSize = manager.gridSpacing.rawValue * 10.0
         workbench.showGuides = manager.showGuides
         
+        if workbench.selectedTool?.id != selectedTool.id {
+             workbench.selectedTool = selectedTool
+        }
+        
         // Pass configuration to Workbench
         workbench.crosshairsStyle = manager.crosshairsStyle
         workbench.paperSize = manager.paperSize
@@ -105,6 +100,7 @@ struct CanvasView: NSViewRepresentable {
         // Callbacks
         workbench.onUpdate = { self.elements = $0 }
         workbench.onSelectionChange = { self.selectedIDs = $0 }
+        workbench.onToolChange = { self.selectedTool = $0 }
         workbench.onMouseMoved = { position in self.manager.mouseLocation = position }
         workbench.onComponentDropped = onComponentDropped
         workbench.onPinHoverChange = { id in

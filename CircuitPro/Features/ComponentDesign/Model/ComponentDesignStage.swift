@@ -16,14 +16,14 @@ enum ComponentDesignStage: String, Displayable, CaseIterable {
     var label: String {
         switch self {
         case .component: return "Component Details"
-        case .symbol: return "Symbol Creation"
-        case .footprint: return "Footprint Creation"
+        case .symbol: return "Symbol"
+        case .footprint: return "Footprint"
         }
     }
 
     // MARK: - Stage-Specific Requirements
     enum ComponentRequirement: StageRequirement {
-        case name, abbreviation, category, properties
+        case name, referenceDesignatorPrefix, category, properties
     }
     enum SymbolRequirement: StageRequirement {
         case primitives, pins
@@ -42,8 +42,8 @@ enum ComponentDesignStage: String, Displayable, CaseIterable {
             if manager.componentName.trimmingCharacters(in: .whitespaces).isEmpty {
                 errors.append(.init(message: "Component name is required.", requirement: ComponentRequirement.name))
             }
-            if manager.componentAbbreviation.trimmingCharacters(in: .whitespaces).isEmpty {
-                errors.append(.init(message: "Abbreviation is required.", requirement: ComponentRequirement.abbreviation))
+            if manager.referenceDesignatorPrefix.trimmingCharacters(in: .whitespaces).isEmpty {
+                errors.append(.init(message: "Reference designator prefix is required.", requirement: ComponentRequirement.referenceDesignatorPrefix))
             }
             if manager.selectedCategory == nil {
                 errors.append(.init(message: "Choose a category.", requirement: ComponentRequirement.category))

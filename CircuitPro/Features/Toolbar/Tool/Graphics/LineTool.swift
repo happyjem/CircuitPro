@@ -4,6 +4,7 @@
 //
 //  Created by Giorgi Tchelidze on 4/30/25.
 //
+
 import SwiftUI
 
 struct LineTool: CanvasTool {
@@ -21,7 +22,6 @@ struct LineTool: CanvasTool {
                 id: UUID(),
                 start: start,
                 end: location,
-                rotation: 0,
                 strokeWidth: 1, // This is the persistent model stroke width
                 color: .init(color: context.selectedLayer.color)
             )
@@ -48,8 +48,12 @@ struct LineTool: CanvasTool {
         )]
     }
 
-    mutating func handleEscape() {
-        start = nil
+    mutating func handleEscape() -> Bool {
+        if start != nil {
+            start = nil
+            return true
+        }
+        return false
     }
 
     mutating func handleBackspace() {

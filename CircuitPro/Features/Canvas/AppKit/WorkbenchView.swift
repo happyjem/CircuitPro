@@ -54,10 +54,16 @@ final class WorkbenchView: NSView {
 
     var selectedTool: AnyCanvasTool? {
         didSet {
-            previewView?.selectedTool = selectedTool
-            if window?.firstResponder != self {
-                window?.makeFirstResponder(self)
+            // We only want to notify the binding when the *type* of tool changes,
+            // not when its internal state changes. Comparing by ID is perfect for this.
+            if oldValue?.id != selectedTool?.id {
+                // If the selectedTool is set to nil (or anything else),
+                // we'll provide a valid tool to the callback, defaulting to the CursorTool.
+                // This ensures the non-optional `@Binding` in CanvasView always has a value.
+                onToolChange?(selectedTool ?? AnyCanvasTool(CursorTool()))
             }
+            previewView?.selectedTool = selectedTool
+            self.becomeFirstResponderIfAppropriate()
         }
     }
 
@@ -117,6 +123,7 @@ final class WorkbenchView: NSView {
     var onSelectionChange: ((Set<UUID>) -> Void)?
     var onPrimitiveAdded: ((UUID, CanvasLayer) -> Void)?
     var onMouseMoved: ((CGPoint) -> Void)?
+    var onToolChange: ((AnyCanvasTool) -> Void)?
     var onPinHoverChange: ((UUID?) -> Void)?
     var onComponentDropped: ((TransferableComponent, CGPoint) -> Void)?
 
@@ -191,6 +198,21 @@ final class WorkbenchView: NSView {
             isEnabled: isSnappingEnabled,
             origin: origin
         )
+    }
+    /// Requests that the workbench become the first responder, but only if another
+    /// text input view does not already have focus. This prevents the workbench
+    /// from stealing focus while the user is typing in a properties panel.
+    func becomeFirstResponderIfAppropriate() {
+        // Check if the current first responder is a text view (the field editor for NSTextField)
+        if window?.firstResponder?.isKind(of: NSTextView.self) == true {
+            // The user is typing somewhere else. Do not steal focus.
+            return
+        }
+        
+        // Otherwise, it's safe to become the first responder.
+        if window?.firstResponder != self {
+            window?.makeFirstResponder(self)
+        }
     }
 
     /// Ensures the schematic graph has vertices for every symbol pin, that their
