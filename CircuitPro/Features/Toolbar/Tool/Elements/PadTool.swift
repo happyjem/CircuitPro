@@ -12,7 +12,7 @@ struct PadTool: CanvasTool {
     let symbolName = CircuitProSymbols.Footprint.pad
     let label = "Pad"
 
-    private var rotation: CardinalRotation = .west
+    private var rotation: CardinalRotation = .east
 
     mutating func handleTap(at location: CGPoint, context: CanvasToolContext) -> CanvasToolResult {
         let number = context.existingPadCount + 1
@@ -46,9 +46,11 @@ struct PadTool: CanvasTool {
     }
 
     mutating func handleRotate() {
-        let all = CardinalRotation.allCases
-        if let idx = all.firstIndex(of: rotation) {
-            rotation = all[(idx + 1) % all.count]
+        let cardinalDirections: [CardinalRotation] = [.east, .north, .west, .south]
+        if let idx = cardinalDirections.firstIndex(of: rotation) {
+            rotation = cardinalDirections[(idx + 1) % cardinalDirections.count]
+        } else {
+            rotation = .east // Default to east if current rotation is diagonal
         }
     }
 }

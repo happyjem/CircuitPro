@@ -1,3 +1,10 @@
+//
+//  ComponentDesignView.swift
+//  CircuitPro
+//
+//  Created by Giorgi Tchelidze on 18.06.25.
+//
+
 import SwiftUI
 
 struct ComponentDesignView: View {
@@ -8,8 +15,7 @@ struct ComponentDesignView: View {
     @Environment(\.modelContext)
     private var modelContext
 
-    @Environment(\.componentDesignManager)
-    private var componentDesignManager
+    @State private var componentDesignManager = ComponentDesignManager()
 
     @State private var currentStage: ComponentDesignStage = .details
     @State private var symbolCanvasManager = CanvasManager()
@@ -41,6 +47,7 @@ struct ComponentDesignView: View {
                     footprintCanvasManager: footprintCanvasManager
                 )
                 .navigationTitle("Component Designer")
+                .environment(componentDesignManager)
                 .toolbar {
                     ToolbarItem {
                         Button {
@@ -87,16 +94,12 @@ struct ComponentDesignView: View {
           Text(messages.joined(separator: "\n"))
         })
         .alert("Warning", isPresented: $showWarning, actions: {
-//          Button("Continue") {
-//            performCreation()  // proceed despite warnings
-//          }
           Button("Cancel", role: .cancel) { }
         }, message: {
           Text(messages.joined(separator: "\n"))
         })
     }
 
-    // 4. Build and insert component
     private func createComponent() {
         if !componentDesignManager.validateForCreation() {
             let errorMessages = componentDesignManager.validationSummary.errors.values
@@ -110,7 +113,6 @@ struct ComponentDesignView: View {
             return
         }
 
-        // Surface warnings (non-blocking)
         let warningMessages = componentDesignManager.validationSummary.warnings.values
             .flatMap { $0 }
             .map { $0.message }
@@ -121,41 +123,35 @@ struct ComponentDesignView: View {
             return
         }
 
+        let symbolEditor = componentDesignManager.symbolEditor
         let canvasSize = symbolCanvasManager.paperSize.canvasSize(orientation: .landscape)
         let anchor = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-        var handledElementIDs = Set<UUID>()
 
-        // 1. Process all text elements to create anchored text definitions.
-        var textDefinitions = [AnchoredTextDefinition]()
-        let textCanvasElements = componentDesignManager.symbolElements.compactMap { element -> TextElement? in
-            guard case .text(let textElement) = element else { return nil }
-            return textElement
-        }
+        var textDefinitions = [TextDefinition]()
+        let textCanvasElements = symbolEditor.elements.compactMap { $0.asTextElement }
 
         for textElement in textCanvasElements {
             let relativePosition = CGPoint(x: textElement.position.x - anchor.x, y: textElement.position.y - anchor.y)
-            let source: TextSource
-
-            if textElement.id == componentDesignManager.referenceDesignatorPrefixTextElementID {
-                source = .dynamic(.reference)
-            } else {
-                source = .static(textElement.text)
-            }
             
-            textDefinitions.append(AnchoredTextDefinition(
-                source: source,
-                relativePosition: relativePosition
-            ))
-            handledElementIDs.insert(textElement.id)
+            if let source = symbolEditor.textSourceMap[textElement.id] {
+                let displayOptions = symbolEditor.textDisplayOptionsMap[textElement.id, default: .allVisible]
+                
+                textDefinitions.append(TextDefinition(
+                    source: source,
+                    relativePosition: relativePosition,
+                    cardinalRotation: textElement.cardinalRotation,
+                    displayOptions: displayOptions
+                ))
+            } else {
+                textDefinitions.append(TextDefinition(
+                    source: .static(textElement.text),
+                    relativePosition: relativePosition,
+                    cardinalRotation: textElement.cardinalRotation
+                ))
+            }
         }
         
-        // 2. Process primitives, excluding any elements that have already been handled.
-        let rawPrimitives: [AnyPrimitive] =
-            componentDesignManager.symbolElements.compactMap { element in
-                guard !handledElementIDs.contains(element.id) else { return nil }
-                if case .primitive(let primitive) = element { return primitive }
-                return nil
-            }
+        let rawPrimitives: [AnyPrimitive] = symbolEditor.elements.compactMap { $0.asPrimitive }
 
         let primitives = rawPrimitives.map { prim -> AnyPrimitive in
             var copy = prim
@@ -163,8 +159,7 @@ struct ComponentDesignView: View {
             return copy
         }
 
-        // 3. Process pins (unchanged)
-        let rawPins = componentDesignManager.pins
+        let rawPins = symbolEditor.pins
         let pins = rawPins.map { pin -> Pin in
             var copy = pin
             copy.translate(by: CGVector(dx: -anchor.x, dy: -anchor.y))
@@ -186,15 +181,14 @@ struct ComponentDesignView: View {
             component: newComponent,
             primitives: primitives,
             pins: pins,
-            anchoredTextDefinitions: textDefinitions
+            textDefinitions: textDefinitions
         )
 
         newComponent.symbol = newSymbol
         modelContext.insert(newComponent)
-        didCreateComponent = true  // flip the flag
+        didCreateComponent = true
     }
 
-    // 5. Reset state if user wants to create another
     private func resetForNewComponent() {
         componentDesignManager.resetAll()
         currentStage = .details
@@ -202,5 +196,4 @@ struct ComponentDesignView: View {
         footprintCanvasManager = CanvasManager()
         didCreateComponent = false
     }
-
 }

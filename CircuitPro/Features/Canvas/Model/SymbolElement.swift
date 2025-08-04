@@ -8,25 +8,28 @@
 import SwiftUI
 
 struct SymbolElement: Identifiable {
-
+    
     let id: UUID
     var instance: SymbolInstance
     let symbol: Symbol
     var reference: String
-    var properties: [DisplayedProperty]
+    var properties: [ResolvedProperty]
 
+    // This array now holds the final, display-ready canvas elements.
     var anchoredTexts: [AnchoredTextElement]
 
     var primitives: [AnyPrimitive] {
         symbol.primitives + symbol.pins.flatMap(\.primitives)
     }
 
+    // The initializer is now much simpler. It accepts fully resolved text data.
     init(
         id: UUID,
         instance: SymbolInstance,
         symbol: Symbol,
         reference: String,
-        properties: [DisplayedProperty]
+        properties: [ResolvedProperty],
+        resolvedTexts: [ResolvedText] // New parameter
     ) {
         self.id = id
         self.instance = instance
@@ -34,90 +37,33 @@ struct SymbolElement: Identifiable {
         self.reference = reference
         self.properties = properties
         
-        self.anchoredTexts = []
-        
-        self.resolveAnchoredTexts()
-    }
-    
-    mutating func resolveAnchoredTexts() {
-        var updatedTexts: [AnchoredTextElement] = []
-        let symbolTransform = self.transform
-
-        // Process definitions from the library symbol
-        for definition in symbol.anchoredTextDefinitions {
-            let override = instance.anchoredTextOverrides.first { $0.definitionID == definition.id }
-            if let override, !override.isVisible { continue }
-
-            // 1. The "anchor" is the text's default position, before any overrides.
-            let anchorAbsolutePos = definition.relativePosition.applying(symbolTransform)
+        // The complex resolution logic is GONE. We simply map the resolved data
+        // into the final canvas elements that know how to draw themselves.
+        let symbolTransform = CGAffineTransform(translationX: instance.position.x, y: instance.position.y)
+            .rotated(by: instance.rotation)
             
-            // 2. The final position includes any user-defined override.
-            let finalRelativePos = override?.relativePositionOverride ?? definition.relativePosition
-            let finalAbsolutePos = finalRelativePos.applying(symbolTransform)
-
-            let text = resolveText(for: definition, with: override)
-
-            if var existing = self.anchoredTexts.first(where: { $0.sourceDataID == definition.id }) {
-                existing.textElement.position = finalAbsolutePos
-                existing.textElement.rotation = self.rotation
-                existing.textElement.text = text
-                existing.anchorPosition = anchorAbsolutePos // Set the correct anchor
-                updatedTexts.append(existing)
-            } else {
-                let textEl = TextElement(id: UUID(), text: text, position: finalAbsolutePos, rotation: self.rotation, font: definition.font, color: definition.color)
-                let newElement = AnchoredTextElement(id: UUID(), textElement: textEl, anchorPosition: anchorAbsolutePos, anchorOwnerID: self.id, sourceDataID: definition.id, isFromDefinition: true)
-                updatedTexts.append(newElement)
-            }
-        }
-
-        // Process ad-hoc texts added only to this instance
-        for adHoc in instance.adHocTexts {
-            let absolutePos = adHoc.relativePosition.applying(symbolTransform)
-
-            if var existing = self.anchoredTexts.first(where: { $0.sourceDataID == adHoc.id }) {
-                existing.textElement.position = absolutePos
-                existing.textElement.rotation = self.rotation
-                existing.textElement.text = adHoc.text
-                existing.anchorPosition = absolutePos // Ad-hoc texts are their own anchor
-                updatedTexts.append(existing)
-            } else {
-                let textEl = TextElement(id: UUID(), text: adHoc.text, position: absolutePos, rotation: self.rotation, font: adHoc.font, color: adHoc.color)
-                let newElement = AnchoredTextElement(id: UUID(), textElement: textEl, anchorPosition: absolutePos, anchorOwnerID: self.id, sourceDataID: adHoc.id, isFromDefinition: false)
-                updatedTexts.append(newElement)
-            }
-        }
-        
-        self.anchoredTexts = updatedTexts
-    }
-    
-    private func resolveText(for definition: AnchoredTextDefinition, with override: AnchoredTextOverride?) -> String {
-        // If there's a text override, it always wins.
-        if let overrideText = override?.textOverride {
-            return overrideText
-        }
-        
-        // Otherwise, resolve the source.
-        switch definition.source {
-        case .static(let text):
-            return text
-        case .dynamic(.reference):
-            return self.reference
-        case .dynamic(.value):
-            // Use the first available property as the "main" value.
-            return properties.first?.value.description ?? "n/a"
+        self.anchoredTexts = resolvedTexts.map { resolvedText -> AnchoredTextElement in
+            AnchoredTextElement(
+                resolvedText: resolvedText,
+                parentID: id,
+                parentTransform: symbolTransform
+            )
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  Equality & Hashing based solely on the element’s id
-// ═══════════════════════════════════════════════════════════════════════
+// MARK: - Conformance (Equatable, Hashable, etc.)
+// These remain unchanged as they correctly operate on the updated `SymbolElement` properties.
+
 extension SymbolElement: Equatable, Hashable {
     static func == (lhs: SymbolElement, rhs: SymbolElement) -> Bool {
+        // Compare all properties that define the visual state of the element.
         lhs.id == rhs.id &&
         lhs.instance == rhs.instance &&
         lhs.reference == rhs.reference &&
-        lhs.properties == rhs.properties
+        lhs.properties == rhs.properties &&
+        // THIS IS THE CRITICAL FIX:
+        lhs.anchoredTexts == rhs.anchoredTexts
     }
 
     func hash(into hasher: inout Hasher) {
@@ -129,21 +75,72 @@ extension SymbolElement: Transformable {
     var position: CGPoint {
         get { instance.position }
         set {
+            // 1. Calculate the delta of the move.
+            let delta = newValue - self.position
+            
+            // 2. Create a new SymbolInstance with the new position.
             let newInstance = instance.copy()
             newInstance.position = newValue
             self.instance = newInstance
-            resolveAnchoredTexts()
+
+            // 3. Apply the *same delta* to all child text elements.
+            //    This moves them in lock-step with the parent.
+            for i in anchoredTexts.indices {
+                anchoredTexts[i].position += delta
+                anchoredTexts[i].anchorPosition += delta // Also move the visual anchor point
+            }
         }
     }
 
     var rotation: CGFloat {
         get { instance.rotation }
         set {
+            // Rotation is more complex because it pivots around an origin.
+            // The simplest, most robust way is to regenerate the texts.
             let newInstance = instance.copy()
             newInstance.rotation = newValue
             self.instance = newInstance
-            resolveAnchoredTexts()
+            
+            // We call our new, efficient position updater.
+            updateAnchoredTextPositions()
         }
+    }
+}
+// Add this new private helper method to the main SymbolElement struct or in a private extension.
+private extension SymbolElement {
+    
+    /// Efficiently updates the world coordinates of all child text elements after the parent symbol moves or rotates.
+    /// This replaces the expensive `resolveAnchoredTexts` method for simple transformations.
+    mutating func updateAnchoredTextPositions() {
+        // Get the parent symbol's new transform.
+        let newParentTransform = self.transform
+
+        // Create a new array to store the updated text elements.
+        var updatedTexts: [AnchoredTextElement] = []
+        
+        // Iterate through the existing text elements.
+        for var canvasText in self.anchoredTexts {
+            // Reconstruct the original resolved data to get the relative positions.
+            // This is necessary because the canvas element only stores absolute positions.
+            let resolvedText = canvasText.toResolvedText(parentTransform: newParentTransform)
+            
+            // Recalculate the absolute world positions using the new transform.
+            canvasText.anchorPosition = resolvedText.anchorRelativePosition.applying(newParentTransform)
+            canvasText.textElement.position = resolvedText.relativePosition.applying(newParentTransform)
+            canvasText.textElement.rotation = newParentTransform.rotationAngle // Match parent rotation
+            
+            updatedTexts.append(canvasText)
+        }
+        
+        // Replace the old array with the updated one.
+        self.anchoredTexts = updatedTexts
+    }
+}
+
+// Helper to extract rotation from CGAffineTransform
+private extension CGAffineTransform {
+    var rotationAngle: CGFloat {
+        return atan2(b, a)
     }
 }
 
@@ -153,6 +150,11 @@ extension SymbolElement {
             .rotated(by: rotation)
     }
 }
+
+// MARK: - Drawing & Hit-Testing
+// The below code for drawing, hit-testing, and bounding boxes does not need
+// to change, as it correctly consumes the `primitives` and `anchoredTexts` arrays
+// that are resolved by the logic above.
 
 extension SymbolElement: Drawable {
     func makeBodyParameters() -> [DrawingParameters] {
@@ -164,7 +166,6 @@ extension SymbolElement: Drawable {
         for drawable in childDrawables {
             for params in drawable.makeBodyParameters() {
                 if let transformedPath = params.path.copy(using: &symbolTransform) {
-                    // **FIXED**: Create a new struct instead of calling a non-existent .copy() method.
                     allParameters.append(DrawingParameters(
                         path: transformedPath,
                         lineWidth: params.lineWidth,
@@ -190,11 +191,7 @@ extension SymbolElement: Drawable {
     func makeHaloParameters(selectedIDs: Set<UUID>) -> DrawingParameters? {
         let finalPath = CGMutablePath()
         
-        // --- 1. Check if the SymbolElement ITSELF is selected ---
         if selectedIDs.contains(self.id) {
-            // The whole symbol is selected, so we draw a halo around everything.
-            
-            // 1.1 Add halos from local-space children (primitives, pins).
             let localHaloPath = CGMutablePath()
             let localDrawables = (symbol.primitives as [any Drawable]) + (symbol.pins as [any Drawable])
             for child in localDrawables {
@@ -207,7 +204,6 @@ extension SymbolElement: Drawable {
                 finalPath.addPath(transformedHalo)
             }
             
-            // 1.2 Add halos from world-space children (text).
             for textElement in anchoredTexts {
                 if let path = textElement.textElement.makeHaloPath() {
                     finalPath.addPath(path)
@@ -215,11 +211,7 @@ extension SymbolElement: Drawable {
             }
             
         } else {
-            // --- 2. The symbol is NOT selected; check for SUB-SELECTED children ---
-            // We only need to check children that can be sub-selected, which are our anchored texts.
             for textElement in anchoredTexts {
-                // We ask the text element to draw its halo, passing the selection context down.
-                // It will only return a path if its ID is in the selectedIDs set.
                 if let textHaloParams = textElement.makeHaloParameters(selectedIDs: selectedIDs) {
                     finalPath.addPath(textHaloParams.path)
                 }
@@ -228,7 +220,6 @@ extension SymbolElement: Drawable {
         
         guard !finalPath.isEmpty else { return nil }
         
-        // --- 3. Return the final, combined halo ---
         return DrawingParameters(
             path: finalPath, lineWidth: 4.0, fillColor: nil,
             strokeColor: NSColor.systemBlue.withAlphaComponent(0.3).cgColor
@@ -236,16 +227,10 @@ extension SymbolElement: Drawable {
     }
 }
 
-
-// MARK: - Hittable and Bounded (Corrected)
 extension SymbolElement: Hittable {
     func hitTest(_ worldPoint: CGPoint, tolerance: CGFloat = 5) -> CanvasHitTarget? {
         let localPoint = worldPoint.applying(self.transform.inverted())
-
-        // Note: Hit test order is important. More specific elements should be checked first.
-        // Text is often on top of everything, so check it before primitives.
         
-        // 1. Check anchored texts first (in world space).
         for textElement in anchoredTexts {
             if let textHitResult = textElement.hitTest(worldPoint, tolerance: tolerance) {
                 let newOwnerPath = [self.id] + textHitResult.ownerPath
@@ -256,7 +241,6 @@ extension SymbolElement: Hittable {
             }
         }
         
-        // 2. Check pins (in local space).
         for pin in symbol.pins {
             if let pinHitResult = pin.hitTest(localPoint, tolerance: tolerance) {
                 let newOwnerPath = [self.id] + pinHitResult.ownerPath
@@ -267,7 +251,6 @@ extension SymbolElement: Hittable {
             }
         }
 
-        // 3. Check body primitives (in local space).
         for primitive in symbol.primitives {
             if let primitiveHitResult = primitive.hitTest(localPoint, tolerance: tolerance) {
                 let newOwnerPath = [self.id] + primitiveHitResult.ownerPath
@@ -286,8 +269,6 @@ extension SymbolElement: Bounded {
         let transform = self.transform
         let localBoxes = symbol.primitives.map(\.boundingBox) + symbol.pins.map(\.boundingBox)
         let transformedBoxes = localBoxes.map { $0.transformed(by: transform) }
-
-        // 5. ADD THIS: Get the bounding boxes for text (already in world space).
         let textBoxes = anchoredTexts.map(\.boundingBox)
         
         return (transformedBoxes + textBoxes).reduce(CGRect.null) { $0.union($1) }
@@ -295,11 +276,7 @@ extension SymbolElement: Bounded {
 }
 
 private extension CGRect {
-
-    // 1 Transformed axis-aligned bounding box
     func transformed(by transform: CGAffineTransform) -> CGRect {
-
-        // 1.1 Corners in local space
         let corners = [
             origin,
             CGPoint(x: maxX, y: minY),
@@ -307,7 +284,6 @@ private extension CGRect {
             CGPoint(x: minX, y: maxY)
         ]
 
-        // 1.2 Map every corner and grow a rectangle around them
         var out = CGRect.null
         for point in corners.map({ $0.applying(transform) }) {
             out = out.union(CGRect(origin: point, size: .zero))

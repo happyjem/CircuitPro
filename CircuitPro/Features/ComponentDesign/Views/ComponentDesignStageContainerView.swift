@@ -11,80 +11,121 @@ struct ComponentDesignStageContainerView: View {
     
     @Binding var currentStage: ComponentDesignStage
     
-    @Environment(\.componentDesignManager)
-    private var componentDesignManager
+    @Environment(ComponentDesignManager.self) private var componentDesignManager
     
     let symbolCanvasManager: CanvasManager
     let footprintCanvasManager: CanvasManager
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            
-            NavigationSplitView {
-                VStack {
-                    switch currentStage {
-                    case .details:
-                        EmptyView()
-                            .toolbar(removing: .sidebarToggle)
-                    case .symbol:
-                        SymbolElementListView()
-                    case .footprint:
-                        FootprintElementListView()
-                    }
-                }
-                .navigationSplitViewColumnWidth(currentStage == .details ? 0 : ComponentDesignConstants.sidebarWidth)
-            } content: {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        if currentStage == .details {
-                            Spacer()
-                                .frame(width: ComponentDesignConstants.sidebarWidth)
-                        }
-                      
-                        StageIndicatorView(
-                            currentStage: $currentStage,
-                            validationProvider: componentDesignManager.validationState
-                        )
-                        Spacer()
-                    }
-                   
-                    Divider()
-                    switch currentStage {
-                    case .details:
-    
-                            HStack {
-                                Spacer()
-                                    .frame(width: ComponentDesignConstants.sidebarWidth)
-                                ComponentDetailView()
-                                Spacer()
-                                    .frame(width: ComponentDesignConstants.sidebarWidth)
-                            }
-                            .directionalPadding(vertical: 25, horizontal: 15)
-                     
-                    case .symbol:
-                        SymbolDesignView()
-                            .environment(symbolCanvasManager)
-                    case .footprint:
-                        FootprintDesignView()
-                            .environment(footprintCanvasManager)
-                    }
-                }
-                
-            } detail: {
-                VStack {
-                switch currentStage {
-                case .details:
-                    EmptyView()
-                case .symbol:
-                    SymbolPropertiesEditorView()
-                case .footprint:
-                    FootprintPropertiesEditorView()
-                }
-                }
-                .navigationSplitViewColumnWidth(currentStage == .details ? 0 : ComponentDesignConstants.sidebarWidth)
-       
+        NavigationSplitView {
+            VStack {
+                sidebarContent
             }
-            .navigationTransition(.automatic)
+            .navigationSplitViewColumnWidth(currentStage == .details ? 0 : ComponentDesignConstants.sidebarWidth)
+        } content: {
+            VStack(alignment: .leading, spacing: 0) {
+                stageIndicator
+                Divider()
+                VStack(spacing: 0) {
+                    stageContent
+                }
+            }
+        } detail: {
+            VStack {
+                detailContent
+            }
+            .navigationSplitViewColumnWidth(currentStage == .details ? 0 : ComponentDesignConstants.sidebarWidth)
+        }
+    }
+    
+    // MARK: - Subviews
+    
+    private var stageIndicator: some View {
+        HStack {
+            StageIndicatorView(
+                currentStage: $currentStage,
+                validationProvider: componentDesignManager.validationState
+            )
+            .if(currentStage == .details) {
+                $0.offset(.init(width: ComponentDesignConstants.sidebarWidth, height: 0))
+            }
+            Spacer()
+        }
+        .background(.windowBackground)
+    }
+    
+    @ViewBuilder
+    private var sidebarContent: some View {
+        switch currentStage {
+        case .details:
+            EmptyView()
+                .toolbar(removing: .sidebarToggle)
+        case .symbol:
+            SymbolElementListView()
+        case .footprint:
+            FootprintElementListView()
+        }
+    }
+    
+    @ViewBuilder
+    private var detailContent: some View {
+        switch currentStage {
+        case .details:
+            EmptyView()
+
+        case .symbol:
+            selectionBasedDetailView(
+                count: componentDesignManager.symbolEditor.selectedElementIDs.count,
+                content: SymbolPropertiesView.init
+            )
+
+        case .footprint:
+            selectionBasedDetailView(
+                count: componentDesignManager.footprintEditor.selectedElementIDs.count,
+                content: FootprintPropertiesView.init
+            )
+        }
+    }
+    
+    @ViewBuilder
+    private var stageContent: some View {
+        switch currentStage {
+        case .details:
+            HStack {
+                Spacer()
+                    .frame(width: ComponentDesignConstants.sidebarWidth)
+                ComponentDetailView()
+                Spacer()
+                    .frame(width: ComponentDesignConstants.sidebarWidth)
+            }
+            .directionalPadding(vertical: 25, horizontal: 15)
+        case .symbol:
+            SymbolCanvasView()
+                .environment(symbolCanvasManager)
+        case .footprint:
+            FootprintCanvasView()
+                .environment(footprintCanvasManager)
+        }
+    }
+
+    @ViewBuilder
+    private func selectionBasedDetailView<Content: View>(
+        count: Int,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        switch count {
+        case 0:
+            Text("No Selection")
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case 1:
+            content()
+        default:
+            Text("Multiple Items Selected")
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

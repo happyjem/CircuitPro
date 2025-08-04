@@ -43,7 +43,7 @@ struct SchematicView: View {
         // Analyze the graph when it changes
         .onChange(of: projectManager.schematicGraph.vertices) { _, _ in updateNets() }
         .onChange(of: projectManager.schematicGraph.edges) { _, _ in updateNets() }
-        // Persist symbol moves back to the model
+        // Persist all UI changes back to the model
         .onChange(of: canvasElements) { _, newValue in
             syncCanvasToModel(newValue)
         }
@@ -67,13 +67,11 @@ struct SchematicView: View {
     ) {
         let pos = canvasManager.snap(point)
 
-        // 2. Current max referenceDesignatorIndex per component UUID
         let instances = projectManager.selectedDesign?.componentInstances ?? []
         var nextRef: [UUID: Int] = instances.reduce(into: [:]) { dict, inst in
             dict[inst.componentUUID] = max(dict[inst.componentUUID] ?? 0, inst.referenceDesignatorIndex)
         }
 
-        // 3. Add each dropped component
         for comp in comps {
             let refNumber = (nextRef[comp.componentUUID] ?? 0) + 1
             nextRef[comp.componentUUID] = refNumber
@@ -84,8 +82,10 @@ struct SchematicView: View {
                 cardinalRotation: .east
             )
 
+            // This initializer now correctly uses `propertyInstances`.
             let instance = ComponentInstance(
                 componentUUID: comp.componentUUID,
+                propertyInstances: [],
                 symbolInstance: symbolInst,
                 footprintInstance: nil,
                 reference: refNumber
@@ -98,7 +98,8 @@ struct SchematicView: View {
         rebuildCanvasElements()
     }
 
-    //  MARK: Build Canvas Model
+    //  MARK: Build Canvas Model (Resolver)
+    // MARK: Build Canvas Model (Resolver)
     private func rebuildCanvasElements() {
         let designComponents = projectManager.designComponents
         var updatedElements: [CanvasElement] = []
@@ -106,42 +107,56 @@ struct SchematicView: View {
             if case .symbol(let s) = $1 { $0[s.id] = .symbol(s) }
         }
 
-        // Iterate through the source of truth (designComponents)
         for dc in designComponents {
             let instanceID = dc.instance.id
+            
+            // 1. Resolve Properties (as before)
+            let resolvedProperties = PropertyResolver.resolve(from: dc.definition, and: dc.instance)
+            
+            // 2. NEW: Resolve Texts using our new TextResolver
+            let resolvedTexts = TextResolver.resolve(
+                from: dc.definition.symbol!,
+                and: dc.instance.symbolInstance,
+                componentName: dc.definition.name,
+                reference: dc.referenceDesignator,
+                properties: resolvedProperties
+            )
             
             if var existingElement = existingElements.removeValue(forKey: instanceID),
                case .symbol(var symbol) = existingElement {
                 
-                // Element exists. Update its data if it has changed.
-                var needsTextResolution = false
+                var needsDataUpdate = false // A flag to check if we need to regenerate texts
                 if symbol.instance != dc.instance.symbolInstance {
                     symbol.instance = dc.instance.symbolInstance
-                    needsTextResolution = true
+                    needsDataUpdate = true
                 }
                 if symbol.reference != dc.referenceDesignator {
                     symbol.reference = dc.referenceDesignator
-                    needsTextResolution = true
+                    needsDataUpdate = true
                 }
-                if symbol.properties != dc.displayedProperties {
-                    symbol.properties = dc.displayedProperties
-                    needsTextResolution = true
+                if symbol.properties != resolvedProperties {
+                    symbol.properties = resolvedProperties
+                    needsDataUpdate = true
                 }
                 
-                if needsTextResolution {
-                    symbol.resolveAnchoredTexts()
+                if needsDataUpdate {
+                    // One of the core data pieces changed, so we must regenerate the
+                    // anchored text elements with the new resolved data.
+                    let symbolTransform = CGAffineTransform(translationX: dc.instance.symbolInstance.position.x, y: dc.instance.symbolInstance.position.y).rotated(by: dc.instance.symbolInstance.rotation)
+                    symbol.anchoredTexts = resolvedTexts.map { AnchoredTextElement(resolvedText: $0, parentID: instanceID, parentTransform: symbolTransform) }
                 }
                 
                 updatedElements.append(.symbol(symbol))
                 
             } else {
-                // New element. Create it.
+                // A new element is created, passing in BOTH resolved properties and texts.
                 let newSymbolElement = SymbolElement(
                     id: instanceID,
                     instance: dc.instance.symbolInstance,
                     symbol: dc.definition.symbol!,
                     reference: dc.referenceDesignator,
-                    properties: dc.displayedProperties
+                    properties: resolvedProperties,
+                    resolvedTexts: resolvedTexts // The new parameter
                 )
                 updatedElements.append(.symbol(newSymbolElement))
             }
@@ -150,28 +165,39 @@ struct SchematicView: View {
         canvasElements = updatedElements
     }
 
-    // MARK: Sync back to SwiftData model
+    // MARK: Sync back to Data Model (Committer)
     private func syncCanvasToModel(_ elements: [CanvasElement]) {
-
-        // Only symbol elements remain
         let symbolElements = elements.compactMap { element -> SymbolElement? in
             if case .symbol(let symbol) = element { return symbol }
             return nil
         }
 
-        // Update component-instance positions & rotations
-        var insts = projectManager.componentInstances
-        let keepIDs = Set(symbolElements.map(\.id))
-        insts.removeAll { !keepIDs.contains($0.id) }
+        let insts = projectManager.componentInstances
 
         for sym in symbolElements {
-            if let idx = insts.firstIndex(where: { $0.id == sym.id }) {
-                // **FIXED**: Assign the whole instance to persist text override changes.
-                insts[idx].symbolInstance = sym.instance
+            // Find the authoritative instance from the project manager's list.
+            guard let instance = insts.first(where: { $0.id == sym.id }) else { continue }
+            
+            // 1. Sync Geometry: Update the SymbolInstance directly.
+            // This check prevents redundant updates if only properties/text changed.
+            if instance.symbolInstance != sym.instance {
+                instance.symbolInstance = sym.instance
+            }
+            
+            // 2. Sync Properties: Tell the ComponentInstance to update itself.
+            for editedProperty in sym.properties {
+                instance.update(with: editedProperty)
+            }
+            
+            // 3. THIS IS THE FIX: Sync Text Changes
+            // We tell the SymbolInstance (nested inside the ComponentInstance) to update itself.
+            for canvasText in sym.anchoredTexts {
+                let editedText = canvasText.toResolvedText(parentTransform: sym.transform)
+                instance.symbolInstance.update(with: editedText)
             }
         }
-        projectManager.componentInstances = insts
-
+        
+        // Announce that the document has changed, so it can be saved.
         document.updateChangeCount(.changeDone)
     }
 }

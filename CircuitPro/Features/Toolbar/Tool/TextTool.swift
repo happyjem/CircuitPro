@@ -11,7 +11,7 @@ struct TextTool: CanvasTool {
 
     
     var id: String = "text-tool"
-    var symbolName: String = CircuitProSymbols.Tool.text
+    var symbolName: String = CircuitProSymbols.Text.textBox
     var label: String = "Text"
 
     mutating func handleTap(at location: CGPoint, context: CanvasToolContext) -> CanvasToolResult {
@@ -21,8 +21,7 @@ struct TextTool: CanvasTool {
             position: location,
             isEditable: false
         )
-        
-        let newAnchoredText = AnchoredTextElement(id: .init(), textElement: newTextElement, anchorPosition: location, anchorOwnerID: .init(), sourceDataID: .init(), isFromDefinition: false)
+
         return .element(.text(newTextElement))
     }
 
