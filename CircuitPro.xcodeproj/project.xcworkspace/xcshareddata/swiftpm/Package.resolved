@@ -1,5 +1,5 @@
 {
-  "originHash" : "9db52e6d3f78e15fa542da4936b29fad2feecab71c7c29cea1916cabff9dd7da",
+  "originHash" : "12e53c8de601f1f42b55fb6d7306d501b3dd85593692630234286bcd6a1fc7a4",
   "pins" : [
     {
       "identity" : "aboutwindow",
@@ -8,6 +8,24 @@
       "state" : {
         "revision" : "bdec18efb0dbee79613e7efa446ed3cc8e834842",
         "version" : "1.0.1"
+      }
+    },
+    {
+      "identity" : "resolvablemacro",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CircuitProApp/ResolvableMacro",
+      "state" : {
+        "branch" : "main",
+        "revision" : "4bfbd0d05cf8d90f8ca493c18c58189c8935b5de"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "0687f71944021d616d34d922343dcef086855920",
+        "version" : "600.0.1"
       }
     },
     {

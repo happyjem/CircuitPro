@@ -10,60 +10,96 @@ import Observation
 
 @Observable
 final class CanvasEditorManager {
-
+    
     // MARK: - Canvas State
-    var elements: [CanvasElement] = [] {
+    var canvasNodes: [BaseNode] = [] {
         didSet {
             updateElementIndexMap()
         }
     }
+    
     var selectedElementIDs: Set<UUID> = []
-    var selectedTool: AnyCanvasTool = AnyCanvasTool(CursorTool())
-    private var elementIndexMap: [UUID: Int] = [:]
-
+    
+    var singleSelectedElement: BaseNode? {
+        guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else {
+            return nil
+        }
+        guard let index = elementIndexMap[id] else {
+            return nil
+        }
+        return canvasNodes[index]
+    }
+    
+    var selectedTool: CanvasTool = CursorTool()
+    var elementIndexMap: [UUID: Int] = [:]
+    
     // MARK: - Layer State (Primarily for Footprint)
-    var selectedLayer: CanvasLayer? = .layer0
-    var layerAssignments: [UUID: CanvasLayer] = [:]
-
+    var layers: [CanvasLayer] = []
+    
+    /// The ID of the currently active layer for drawing operations.
+    var activeLayerId: UUID?
+    
     // MARK: - Text State
     private(set) var textSourceMap: [UUID: TextSource] = [:]
     private(set) var textDisplayOptionsMap: [UUID: TextDisplayOptions] = [:]
-
+    
     // MARK: - Computed Properties
     var pins: [Pin] {
-        elements.compactMap { $0.asPin }
+        canvasNodes.compactMap { ($0 as? PinNode)?.pin }
     }
-
+    
     var pads: [Pad] {
-        elements.compactMap { $0.asPad }
+        canvasNodes.compactMap { ($0 as? PadNode)?.pad }
     }
     
     var placedTextSources: Set<TextSource> {
         return Set(textSourceMap.values)
     }
-
-    // MARK: - Initializer
-    init() {}
-
+    
     // MARK: - State Management
     private func updateElementIndexMap() {
         elementIndexMap = Dictionary(
-            uniqueKeysWithValues: elements.enumerated().map { ($1.id, $0) }
+            uniqueKeysWithValues: canvasNodes.enumerated().map { ($1.id, $0) }
         )
         
-        // Prune any text source mappings that no longer have a corresponding element
-        let currentTextElementIDs = Set(elements.compactMap { $0.asTextElement?.id })
-        textSourceMap = textSourceMap.filter { currentTextElementIDs.contains($0.key) }
-        textDisplayOptionsMap = textDisplayOptionsMap.filter { currentTextElementIDs.contains($0.key) }
+        // Prune any text source mappings that no longer have a corresponding element.
+        // This now correctly filters for TextNode objects and extracts their IDs.
+        let currentTextNodeIDs = Set(canvasNodes.compactMap { ($0 as? TextNode)?.id })
+        textSourceMap = textSourceMap.filter { currentTextNodeIDs.contains($0.key) }
+        textDisplayOptionsMap = textDisplayOptionsMap.filter { currentTextNodeIDs.contains($0.key) }
     }
     
+    func setupForFootprintEditing() {
+        self.layers = LayerKind.footprintLayers.map { kind in
+            CanvasLayer(
+                id: kind.stableId,
+                name: kind.label,
+                isVisible: true,
+                color: NSColor(kind.defaultColor).cgColor,
+                zIndex: kind.zIndex,
+                kind: kind
+            )
+        }
+        self.layers.append(self.unlayeredSection)
+        // Set the first layer as active by default.
+        self.activeLayerId = self.layers.first?.id
+    }
+    
+    private let unlayeredSection: CanvasLayer = .init(
+        id: .init(),
+        name: "Unlayered",
+        isVisible: true,
+        color: NSColor.gray.cgColor,
+        zIndex: -1
+    )
+    
     func reset() {
-        elements = []
+        canvasNodes = []
         selectedElementIDs = []
-        selectedTool = AnyCanvasTool(CursorTool())
+        selectedTool = CursorTool()
         elementIndexMap = [:]
-        selectedLayer = .layer0
-        layerAssignments = [:]
+        layers = []
+        activeLayerId = nil
         textSourceMap = [:]
         textDisplayOptionsMap = [:]
     }
@@ -73,51 +109,55 @@ final class CanvasEditorManager {
 extension CanvasEditorManager {
     
     /// Adds a new text element to the canvas, linked to a specific data source.
-    func addTextToSymbol(source: TextSource, displayName: String, componentData: (name: String, prefix: String, properties: [PropertyDefinition])) {
+    func addTextToSymbol(source: TextSource, displayName: String, componentData: (name: String, prefix: String, properties: [Property.Definition])) {
         guard !placedTextSources.contains(source) else { return }
-
+        
         let defaultPaper = PaperSize.component
         let canvasSize = defaultPaper.canvasSize()
         let centerPoint = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         
         let newElementID = UUID()
-
+        
         // Add the source and default options to maps so resolveText can find them
         textSourceMap[newElementID] = source
         if case .dynamic = source {
-            textDisplayOptionsMap[newElementID] = .allVisible
+            textDisplayOptionsMap[newElementID] = .default
         }
         
         let resolvedText = resolveText(for: newElementID, source: source, componentData: componentData)
-
-        let newElement = TextElement(
+        
+        // Create a a new TextModel with the resolved data.
+        let textModel = TextModel(
             id: newElementID,
             text: resolvedText.isEmpty ? displayName : resolvedText,
-            position: centerPoint
+            position: centerPoint, anchor: .bottomLeft
         )
         
-        elements.append(.text(newElement))
+        // Create a new TextNode from the model and add it to the canvas.
+        let newNode = TextNode(textModel: textModel)
+        canvasNodes.append(newNode)
     }
     
     /// Iterates through all dynamic text on the canvas and ensures its displayed text is up-to-date with the latest component data.
-    func updateDynamicTextElements(componentData: (name: String, prefix: String, properties: [PropertyDefinition])) {
+    func updateDynamicTextElements(componentData: (name: String, prefix: String, properties: [Property.Definition])) {
         for (elementID, source) in textSourceMap {
             guard let index = elementIndexMap[elementID],
-                  case .text(var textElement) = elements[index] else {
+                  let textNode = canvasNodes[index] as? TextNode else {
                 continue
             }
             
             let newText = resolveText(for: elementID, source: source, componentData: componentData)
             
-            if textElement.text != newText {
-                textElement.text = newText
-                elements[index] = .text(textElement)
+            // If the text has changed, update the text property on the node's model.
+            // Since TextModel is a struct, this correctly triggers observation.
+            if textNode.textModel.text != newText {
+                textNode.textModel.text = newText
             }
         }
     }
-
+    
     /// Removes text elements from the canvas if their underlying property definition was deleted from the component.
-    func synchronizeSymbolTextWithProperties(properties: [PropertyDefinition]) {
+    func synchronizeSymbolTextWithProperties(properties: [Property.Definition]) {
         let validPropertyIDs = Set(properties.map { $0.id })
         let textElementsToRemove = textSourceMap.filter { (_, source) in
             if case .dynamic(.property(let definitionID)) = source {
@@ -129,11 +169,11 @@ extension CanvasEditorManager {
         guard !textElementsToRemove.isEmpty else { return }
         
         let idsToRemove = Set(textElementsToRemove.keys)
-        elements.removeAll { idsToRemove.contains($0.id) }
+        canvasNodes.removeAll { idsToRemove.contains($0.id) }
     }
     
     /// Gets the current display string for a given text element ID by resolving its source and applying display options.
-    private func resolveText(for elementID: UUID, source: TextSource, componentData: (name: String, prefix: String, properties: [PropertyDefinition])) -> String {
+    private func resolveText(for elementID: UUID, source: TextSource, componentData: (name: String, prefix: String, properties: [Property.Definition])) -> String {
         switch source {
         case .static(let text):
             return text
@@ -146,7 +186,7 @@ extension CanvasEditorManager {
                 return "Invalid Property"
             }
             
-            let options = textDisplayOptionsMap[elementID, default: .allVisible]
+            let options = textDisplayOptionsMap[elementID, default: .default]
             var parts: [String] = []
             
             if options.showKey {
@@ -154,7 +194,7 @@ extension CanvasEditorManager {
             }
             
             if options.showValue {
-                let valueDescription = prop.defaultValue.description
+                let valueDescription = prop.value.description
                 parts.append(valueDescription.isEmpty ? "?" : valueDescription)
             }
             
@@ -167,19 +207,38 @@ extension CanvasEditorManager {
     }
     
     /// Creates a `Binding` for a specific text element's display options.
-    func bindingForDisplayOptions(with id: UUID, componentData: (name: String, prefix: String, properties: [PropertyDefinition])) -> Binding<TextDisplayOptions>? {
+    func bindingForDisplayOptions(with id: UUID, componentData: (name: String, prefix: String, properties: [Property.Definition])) -> Binding<TextDisplayOptions>? {
         guard let source = textSourceMap[id], case .dynamic = source else {
             return nil
         }
         
         return Binding<TextDisplayOptions>(
             get: {
-                return self.textDisplayOptionsMap[id, default: .allVisible]
+                return self.textDisplayOptionsMap[id, default: .default]
             },
             set: { newOptions in
                 self.textDisplayOptionsMap[id] = newOptions
                 self.updateDynamicTextElements(componentData: componentData)
             }
         )
+    }
+    
+    func removeTextFromSymbol(source: TextSource) {
+        // Find all text element IDs that map to this source (should be at most one).
+        let idsToRemove = textSourceMap.filter { $0.value == source }.map { $0.key }
+        guard !idsToRemove.isEmpty else { return }
+
+        // Remove matching nodes from the canvas.
+        canvasNodes.removeAll { node in
+            idsToRemove.contains(node.id)
+        }
+
+        // Clean up state maps and selection.
+        for id in idsToRemove {
+            textSourceMap.removeValue(forKey: id)
+            textDisplayOptionsMap.removeValue(forKey: id)
+            selectedElementIDs.remove(id)
+        }
+        // canvasNodes didSet will update indices and prune any stragglers.
     }
 }
