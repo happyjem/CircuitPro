@@ -21,13 +21,16 @@ struct ComponentDesignView: View {
     @State private var symbolCanvasManager = CanvasManager()
     @State private var footprintCanvasManager = CanvasManager()
 
+    // ... other state properties remain the same ...
     @State private var showError = false
     @State private var showWarning = false
     @State private var messages = [String]()
     @State private var didCreateComponent = false
     @State private var showFeedbackSheet: Bool = false
 
+
     var body: some View {
+        // --- THIS ENTIRE VIEW BODY REMAINS UNCHANGED ---
         Group {
             if didCreateComponent {
                 ComponentDesignSuccessView(
@@ -83,10 +86,8 @@ struct ComponentDesignView: View {
             }
         }
         .onAppear {
-            symbolCanvasManager.showGuides = true
-            footprintCanvasManager.showGuides = true
-            symbolCanvasManager.paperSize = .component
-            footprintCanvasManager.paperSize = .component
+            symbolCanvasManager.viewport.size = PaperSize.component.canvasSize()
+            footprintCanvasManager.viewport.size = PaperSize.component.canvasSize()
         }
         .alert("Error", isPresented: $showError, actions: {
           Button("OK", role: .cancel) { }
@@ -101,6 +102,7 @@ struct ComponentDesignView: View {
     }
 
     private func createComponent() {
+        // --- Validation logic remains the same ---
         if !componentDesignManager.validateForCreation() {
             let errorMessages = componentDesignManager.validationSummary.errors.values
                 .flatMap { $0 }
@@ -122,38 +124,53 @@ struct ComponentDesignView: View {
             showWarning = true
             return
         }
-
+        
+        // --- THE REFACTORED LOGIC BEGINS HERE ---
+        
         let symbolEditor = componentDesignManager.symbolEditor
-        let canvasSize = symbolCanvasManager.paperSize.canvasSize(orientation: .landscape)
+        let canvasSize = symbolCanvasManager.viewport.size
         let anchor = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
 
-        var textDefinitions = [TextDefinition]()
-        let textCanvasElements = symbolEditor.elements.compactMap { $0.asTextElement }
-
-        for textElement in textCanvasElements {
-            let relativePosition = CGPoint(x: textElement.position.x - anchor.x, y: textElement.position.y - anchor.y)
+        let textNodes = symbolEditor.canvasNodes.compactMap { $0 as? TextNode }
+        
+        // Convert each TextNode from the canvas into a new CircuitText.Definition
+        let textDefinitions: [CircuitText.Definition] = textNodes.map { textNode in
+            let relativePosition = CGPoint(x: textNode.position.x - anchor.x, y: textNode.position.y - anchor.y)
             
-            if let source = symbolEditor.textSourceMap[textElement.id] {
-                let displayOptions = symbolEditor.textDisplayOptionsMap[textElement.id, default: .allVisible]
-                
-                textDefinitions.append(TextDefinition(
-                    source: source,
-                    relativePosition: relativePosition,
-                    cardinalRotation: textElement.cardinalRotation,
-                    displayOptions: displayOptions
-                ))
+            // Determine the content source and display options based on editor maps
+            let contentSource: TextSource
+            let displayOptions: TextDisplayOptions
+            
+            if let sourceFromMap = symbolEditor.textSourceMap[textNode.id] {
+                contentSource = sourceFromMap
+                displayOptions = symbolEditor.textDisplayOptionsMap[textNode.id, default: .default]
             } else {
-                textDefinitions.append(TextDefinition(
-                    source: .static(textElement.text),
-                    relativePosition: relativePosition,
-                    cardinalRotation: textElement.cardinalRotation
-                ))
+                contentSource = .static(textNode.textModel.text)
+                displayOptions = .default
             }
+            
+            // Create the new, immutable Definition struct by calling its single memberwise initializer.
+            return CircuitText.Definition(
+                id: UUID(), // A new, persistent ID for the data model
+                contentSource: contentSource,
+                text: "", // Not used by definitions, but required by the init
+                displayOptions: displayOptions,
+                relativePosition: relativePosition,
+                definitionPosition: relativePosition, // For a new definition, these start identical
+                font: textNode.textModel.font,
+                color: textNode.textModel.color,
+                anchor: textNode.textModel.anchor,
+                alignment: textNode.textModel.alignment,
+                cardinalRotation: textNode.textModel.cardinalRotation,
+                isVisible: true
+            )
         }
         
-        let rawPrimitives: [AnyPrimitive] = symbolEditor.elements.compactMap { $0.asPrimitive }
-
-        let primitives = rawPrimitives.map { prim -> AnyPrimitive in
+        // --- The rest of the creation logic remains the same ---
+        
+        let rawPrimitives: [AnyCanvasPrimitive] = symbolEditor.canvasNodes.compactMap { ($0 as? PrimitiveNode)?.primitive }
+        
+        let primitives = rawPrimitives.map { prim -> AnyCanvasPrimitive in
             var copy = prim
             copy.translate(by: CGVector(dx: -anchor.x, dy: -anchor.y))
             return copy
@@ -165,14 +182,15 @@ struct ComponentDesignView: View {
             copy.translate(by: CGVector(dx: -anchor.x, dy: -anchor.y))
             return copy
         }
+        
+        guard let category = componentDesignManager.selectedCategory else { return }
 
         let newComponent = Component(
             name: componentDesignManager.componentName,
             referenceDesignatorPrefix: componentDesignManager.referenceDesignatorPrefix,
             symbol: nil,
             footprints: [],
-            category: componentDesignManager.selectedCategory,
-            package: componentDesignManager.selectedPackageType,
+            category: category,
             propertyDefinitions: componentDesignManager.componentProperties
         )
 
@@ -181,14 +199,15 @@ struct ComponentDesignView: View {
             component: newComponent,
             primitives: primitives,
             pins: pins,
-            textDefinitions: textDefinitions
+            textDefinitions: textDefinitions // Use the newly created definitions
         )
 
         newComponent.symbol = newSymbol
         modelContext.insert(newComponent)
         didCreateComponent = true
     }
-
+    
+    // --- resetForNewComponent remains the same ---
     private func resetForNewComponent() {
         componentDesignManager.resetAll()
         currentStage = .details

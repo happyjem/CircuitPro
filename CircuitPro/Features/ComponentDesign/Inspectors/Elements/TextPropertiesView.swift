@@ -8,11 +8,15 @@
 import SwiftUI
 
 struct TextPropertiesView: View {
-    @Binding var textElement: TextElement
-    let editor: CanvasEditorManager
-    @Environment(ComponentDesignManager.self) private var componentDesignManager
     
-    private var componentData: (name: String, prefix: String, properties: [PropertyDefinition]) {
+    @Environment(ComponentDesignManager.self)
+    private var componentDesignManager
+    
+    @Binding var textModel: TextModel
+
+    let editor: CanvasEditorManager
+
+    private var componentData: (name: String, prefix: String, properties: [Property.Definition]) {
         (componentDesignManager.componentName, componentDesignManager.referenceDesignatorPrefix, componentDesignManager.componentProperties)
     }
 
@@ -21,30 +25,29 @@ struct TextPropertiesView: View {
             Text("Text Properties")
                 .font(.title3.weight(.semibold))
             
-            // 1. Content Section
             contentSection
 
             Divider()
             
-            // 2. Transform Section
             InspectorSection("Transform") {
-                PointControlView(title: "Position", point: $textElement.position, displayOffset: PaperSize.component.centerOffset())
-                RotationControlView(object: $textElement, tickStepDegrees: 45, snapsToTicks: true)
+                PointControlView(title: "Position", point: $textModel.position, displayOffset: PaperSize.component.centerOffset())
+                RotationControlView(object: $textModel, tickStepDegrees: 45, snapsToTicks: true)
             }
             
             Divider()
 
-            // 3. Appearance Section
             InspectorSection("Appearance") {
-                // In a real app, you'd have font pickers etc.
-                // For now, these are placeholders.
-                InspectorRow("Font") {
-                    TextField("Font Name", text: .constant(textElement.font.fontName))
-                        .inspectorField()
+                InspectorRow("Alignment") {
+                    AnchorPickerView(selectedAnchor: $textModel.anchor)
+//                        .inspectorField()
                 }
-                InspectorRow("Size") {
-                    InspectorNumericField(title: "Size", value: .constant(textElement.font.pointSize))
-                }
+//                InspectorRow("Font") {
+//                    TextField("Font Name", text: .constant(textModel.font.fontName))
+//                        .inspectorField()
+//                }
+//                InspectorRow("Size") {
+//                    InspectorNumericField(title: "Size", value: .constant(textModel.font.pointSize))
+//                }
             }
         }
         .padding(10)
@@ -54,7 +57,7 @@ struct TextPropertiesView: View {
     /// depending on whether it is static or dynamically linked to a property.
     @ViewBuilder
     private var contentSection: some View {
-        let source = editor.textSourceMap[textElement.id]
+        let source = editor.textSourceMap[textModel.id]
 
         InspectorSection("Content") {
             // This part is the same: Show the source description.
@@ -67,7 +70,7 @@ struct TextPropertiesView: View {
                 }
             } else {
                 InspectorRow("Text") {
-                    TextField("Static Text", text: $textElement.text)
+                    TextField("Static Text", text: $textModel.text)
                         .inspectorField()
                 }
             }
@@ -75,7 +78,7 @@ struct TextPropertiesView: View {
             // If the source is a property, show the display option toggles.
             if let source, case .dynamic(.property) = source {
                 // Get a binding to the display options from the manager.
-                if let optionsBinding = editor.bindingForDisplayOptions(with: textElement.id, componentData: componentData) {
+                if let optionsBinding = editor.bindingForDisplayOptions(with: textModel.id, componentData: componentData) {
                     
                     Text("Display Options").font(.caption).foregroundColor(.secondary)
                     

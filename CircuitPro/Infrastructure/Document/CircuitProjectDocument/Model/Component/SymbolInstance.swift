@@ -17,17 +17,17 @@ final class SymbolInstance: Identifiable, Codable, Transformable {
     var position: CGPoint
     var cardinalRotation: CardinalRotation = .east
     
-    // 1. ADD THIS: Stores overrides for text defined in the master symbol.
-    var textOverrides: [TextOverride]
-    // 2. ADD THIS: Stores new text added only to this specific instance.
-    var textInstances: [TextInstance]
+    // Stores overrides for text defined in the master symbol.
+    var textOverrides: [CircuitText.Override]
+    // Stores new text added only to this specific instance.
+    var textInstances: [CircuitText.Instance]
 
     var rotation: CGFloat {
         get { cardinalRotation.radians }
         set { cardinalRotation = .closest(to: newValue) }
     }
 
-    init(id: UUID = UUID(), symbolUUID: UUID, position: CGPoint, cardinalRotation: CardinalRotation = .east, textOverrides: [TextOverride] = [], textInstances: [TextInstance] = []) {
+    init(id: UUID = UUID(), symbolUUID: UUID, position: CGPoint, cardinalRotation: CardinalRotation = .east, textOverrides: [CircuitText.Override] = [], textInstances: [CircuitText.Instance] = []) {
         self.id = id
         self.symbolUUID = symbolUUID
         self.position = position
