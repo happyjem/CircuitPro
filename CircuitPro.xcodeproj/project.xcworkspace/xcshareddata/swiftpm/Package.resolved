@@ -1,5 +1,5 @@
 {
-  "originHash" : "12e53c8de601f1f42b55fb6d7306d501b3dd85593692630234286bcd6a1fc7a4",
+  "originHash" : "cda07dc3bfec1d900a8cc504cb77666faeef38af33e99d5c9880272fc7396697",
   "pins" : [
     {
       "identity" : "aboutwindow",
@@ -11,12 +11,12 @@
       }
     },
     {
-      "identity" : "resolvablemacro",
+      "identity" : "resolvable",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/CircuitProApp/ResolvableMacro",
+      "location" : "https://github.com/CircuitProApp/Resolvable",
       "state" : {
         "branch" : "main",
-        "revision" : "4bfbd0d05cf8d90f8ca493c18c58189c8935b5de"
+        "revision" : "427defc96b6967ddeb0e6527574991f8789e12c5"
       }
     },
     {
@@ -42,8 +42,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/happyjem/WelcomeWindow.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "7f616fbf8c668f88751abfc086f77a58143c958c"
+        "revision" : "b263f8adf5b94887a6c9d53c9c7ff9cabe00de2d"
       }
     }
   ],

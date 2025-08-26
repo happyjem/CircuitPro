@@ -10,7 +10,7 @@ import SwiftData
 
 struct SchematicCanvasView: View {
 
-    var document: CircuitProjectDocument
+    var document: CircuitProjectFileDocument
     @State var canvasManager = CanvasManager()
 
     @Environment(\.projectManager)
@@ -48,7 +48,7 @@ struct SchematicCanvasView: View {
             snapProvider: CircuitProSnapProvider(),
             registeredDraggedTypes: [.transferableComponent],
             onPasteboardDropped: handleComponentDrop,
-            onModelDidChange: { self.document.updateChangeCount(.changeDone) }
+            onModelDidChange: { document.scheduleAutosave() }
         )
         .onCanvasChange { context in
             canvasManager.mouseLocation = context.processedMouseLocation ?? .zero
@@ -57,7 +57,16 @@ struct SchematicCanvasView: View {
             SchematicToolbarView(selectedSchematicTool: $selectedTool)
                 .padding(16)
         }
-        .onAppear(perform: projectManager.rebuildCanvasNodes)
+        .onAppear {
+            projectManager.rebuildCanvasNodes()
+            // Connect the graph's change handler to the persistence logic.
+            // This ensures that whenever a wire is added, deleted, or moved,
+            // the changes are saved back to the document model.
+            projectManager.schematicGraph.onModelDidChange = {
+                projectManager.persistSchematicGraph()
+                document.scheduleAutosave()
+            }
+        }
         .onChange(of: projectManager.designComponents) {
              // When the underlying data model changes, just tell the manager to rebuild.
             projectManager.rebuildCanvasNodes()
@@ -77,7 +86,6 @@ struct SchematicCanvasView: View {
                 projectManager.schematicGraph.releasePins(for: componentID)
             }
             projectManager.selectedDesign?.componentInstances.removeAll { missingComponentIDs.contains($0.id) }
-            document.updateChangeCount(.changeDone)
         }
     }
     
@@ -119,9 +127,8 @@ struct SchematicCanvasView: View {
             ownerID: newComponentInstance.id
         )
         
-        document.updateChangeCount(.changeDone)
+        document.scheduleAutosave()
         
         return true
     }
 }
-

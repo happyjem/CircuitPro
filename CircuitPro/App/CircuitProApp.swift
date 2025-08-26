@@ -7,45 +7,41 @@
 
 import SwiftUI
 import SwiftData
-import WelcomeWindow
-import AboutWindow
 
 @main
 struct CircuitProApp: App {
-
-    @Environment(\.openWindow)
-    private var openWindow
-    
-
-
-    init() {
-        _ = CircuitProjectDocumentController.shared
-    }
-
     var body: some Scene {
-        Group {
-            WelcomeWindow(
-                actions: { dismiss in
-                    WelcomeWindowActions(dismiss: dismiss)
-                },
-                onDrop: { url, dismiss in
-                    Task {
-                        CircuitProjectDocumentController.shared.openDocument(at: url, onCompletion: { dismiss() })
+        WelcomeWindowScene()
+            .commands {
+                CircuitProCommands()
+            }
+
+        WindowGroup(for: DocumentID.self) { $docID in
+            if let id = docID, let doc = DocumentRegistry.shared.document(for: id) {
+                WorkspaceView(document: doc)
+                    .modelContainer(ModelContainerManager.shared.container)
+                    .environment(\.projectManager,
+                        ProjectManager(project: doc.model,
+                                       modelContext: ModelContainerManager.shared.container.mainContext))
+                    .focusedSceneValue(\.activeDocumentID, id)
+                    .onReceive(doc.objectWillChange) { _ in
+                        print("Observable works")
+                        doc.scheduleAutosave()
                     }
-                }
-            )
-    
-            AboutWindow(actions: {}, footer: { AboutFooterView() })
-            
+                    .onDisappear { DocumentRegistry.shared.close(id: id) }
+            }
         }
-        .commands {
-            CircuitProCommands()
-        }
+        .defaultSize(width: 1000, height: 700)
+        .windowToolbarStyle(.unifiedCompact)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
 
         Window("Component Design", id: "ComponentDesignWindow") {
             ComponentDesignView()
                 .frame(minWidth: 800, minHeight: 600)
                 .modelContainer(ModelContainerManager.shared.container)
         }
+
+        AboutWindowScene()
     }
 }
