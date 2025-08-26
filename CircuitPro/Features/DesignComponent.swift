@@ -10,7 +10,7 @@ import SwiftUI
 struct DesignComponent: Identifiable, Hashable {
 
     // SwiftData model
-    let definition: Component
+    let definition: ComponentDefinition
 
     // NSDocument model
     let instance: ComponentInstance
@@ -27,10 +27,5 @@ struct DesignComponent: Identifiable, Hashable {
             overrides: instance.propertyOverrides,
             instances: instance.propertyInstances
         )
-    }
-    
-    /// When the UI makes an edit, it can call this simple method.
-    func save(editedProperty: Property.Resolved) {
-        instance.update(with: editedProperty)
     }
 }

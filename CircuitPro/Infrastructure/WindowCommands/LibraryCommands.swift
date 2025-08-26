@@ -14,14 +14,6 @@ struct LibraryCommands: Commands {
                  LibraryPanelManager.toggle()
             }
             .keyboardShortcut("l", modifiers: [.command, .shift])
-
-            #if DEBUG
-            Divider()
-
-            Button("Export Populated App Library...") {
-                DeveloperTools.exportAndSavePopulatedLibrary()
-            }
-            #endif
         }
     }
 }

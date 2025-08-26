@@ -12,15 +12,22 @@ import AppKit
 /// This is a container node that doesn't draw any geometry itself. Instead, it acts as a
 /// parent for `PinNode`, `PrimitiveNode`, and `AnchoredTextNode` children. Its transform
 /// is applied to all its children automatically by the scene graph.
+@Observable
 final class SymbolNode: BaseNode {
 
     // MARK: - Properties
 
-    let instance: SymbolInstance
-    let symbol: Symbol
+    var instance: SymbolInstance {
+        didSet {
+            onNeedsRedraw?()
+        }
+    }
+    let symbol: SymbolDefinition
     weak var graph: WireGraph?
 
     override var isSelectable: Bool { true }
+    
+    let resolvedTexts: [CircuitText.Resolved]
 
     // MARK: - Overridden Scene Graph Properties
 
@@ -43,10 +50,13 @@ final class SymbolNode: BaseNode {
     // MARK: - Initialization
 
     // CHANGED: The initializer now takes an array of the new `CircuitText.Resolved` model.
-    init(id: UUID, instance: SymbolInstance, symbol: Symbol, resolvedTexts: [CircuitText.Resolved], graph: WireGraph? = nil) {
+    init(id: UUID, instance: SymbolInstance, symbol: SymbolDefinition, resolvedTexts: [CircuitText.Resolved], graph: WireGraph? = nil) {
         self.instance = instance
         self.symbol = symbol
         self.graph = graph
+        
+        self.resolvedTexts = resolvedTexts
+        
         super.init(id: id)
 
         // Primitive and Pin creation is unchanged.

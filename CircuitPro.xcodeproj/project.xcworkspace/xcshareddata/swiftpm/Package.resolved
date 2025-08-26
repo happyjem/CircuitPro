@@ -1,5 +1,5 @@
 {
-  "originHash" : "cda07dc3bfec1d900a8cc504cb77666faeef38af33e99d5c9880272fc7396697",
+  "originHash" : "4d7ef784113fc47cf8294a3072c80c9a97b1b4eccbbd2e3fe5a147e58d8108e6",
   "pins" : [
     {
       "identity" : "aboutwindow",
@@ -16,7 +16,7 @@
       "location" : "https://github.com/CircuitProApp/Resolvable",
       "state" : {
         "branch" : "main",
-        "revision" : "427defc96b6967ddeb0e6527574991f8789e12c5"
+        "revision" : "5641a8e796d6840790eb805bdab7835480d9ab12"
       }
     },
     {
@@ -26,6 +26,15 @@
       "state" : {
         "revision" : "0687f71944021d616d34d922343dcef086855920",
         "version" : "600.0.1"
+      }
+    },
+    {
+      "identity" : "swiftdatapacks",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CircuitProApp/SwiftDataPacks",
+      "state" : {
+        "branch" : "main",
+        "revision" : "e043a1f41b208c33e3fbf634d1b86b7b5125164d"
       }
     },
     {

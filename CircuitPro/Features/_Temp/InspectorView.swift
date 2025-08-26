@@ -6,70 +6,74 @@
 //
 
 import SwiftUI
+import SwiftDataPacks // Required to use @PackManager
 
 struct InspectorView: View {
     
     @Environment(\.projectManager)
     private var projectManager
     
+    // 1. Get the PackManager from the environment to fetch component definitions.
+    @PackManager private var packManager
+    
+    @State private var selectedTab: InspectorTab = .attributes
+    
+    /// A computed property that attempts to find the selected node.
+    private var singleSelectedNode: BaseNode? {
+        guard projectManager.selectedNodeIDs.count == 1,
+              let selectedID = projectManager.selectedNodeIDs.first else {
+            return nil
+        }
+        return projectManager.canvasNodes.findNode(with: selectedID)
+    }
+    
+    /// A computed property that finds both the symbol node AND its corresponding DesignComponent.
+    /// This is the key piece of logic that connects the canvas selection to the data model.
+    @MainActor private var selectedComponentContext: (component: DesignComponent, node: SymbolNode)? {
+        // Ensure the selected node is a SymbolNode
+        guard let symbolNode = singleSelectedNode as? SymbolNode else {
+            return nil
+        }
+        
+        // Use the project manager to get the list of all design components
+        let components = projectManager.designComponents(using: packManager)
+        
+        // Find the specific component that matches our selected node's ID
+        if let component = components.first(where: { $0.id == symbolNode.id }) {
+            return (component, symbolNode)
+        }
+        
+        return nil
+    }
+    
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Test Controls").font(.headline)
+        @Bindable var manager = projectManager
+        
+        VStack(alignment: .leading, spacing: 0) {
             
-            // This list provides the buttons to trigger the override action.
-            ForEach(projectManager.designComponents, id: \.self) { component in
-                Button("Override '\(component.definition.name)' Resistance to 100Ω") {
-                    // 1. Find the first property that is based on a definition.
-                    //    We only want to test overriding definitions, not ad-hoc instance properties.
-                    guard var propertyToEdit = component.displayedProperties.first(where: {
-                        if case .definition = $0.source { return true }
-                        return false
-                    }) else {
-                        print("No definition-based property found to override.")
-                        return
-                    }
-                    
-                    // 2. Modify the value on our local copy.
-                    //    `propertyToEdit` is a struct, so it's a mutable copy.
-                    propertyToEdit.value = .single(100.0)
-                    
-                    // 3. Call the save method on the DesignComponent.
-                    //    This is the core of the test. This method will find or create
-                    //    the Property.Override on the ComponentInstance.
-                    component.save(editedProperty: propertyToEdit)
-                    
-                    // Since ComponentInstance is @Observable, this change will
-                    // automatically trigger an update in the view below.
+            // 2. Check for the rich context object first.
+            if let context = selectedComponentContext {
+                SymbolNodeInspectorHostView(
+                    component: context.component,
+                    symbolNode: context.node,
+                    selectedTab: $selectedTab // Pass the binding for tab selection
+                )
+            } else if singleSelectedNode != nil {
+                // 3. Handle cases where an item is selected, but it's not a component
+                //    (e.g., a wire or a net label).
+                Text("Properties for this element type are not yet implemented.")
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // 4. Handle no selection or multiple selection.
+                VStack {
+                    Spacer()
+                    Text(manager.selectedNodeIDs.isEmpty ? "No Selection" : "Multiple Items Selected")
+                        .foregroundColor(.secondary)
+                    Spacer()
                 }
-            }
-            
-            Divider().padding(.vertical)
-            
-            Text("Live Property Values").font(.headline)
-
-            // This list displays the live, resolved values so we can see the result.
-            ScrollView {
-                VStack(alignment: .leading) {
-                    ForEach(projectManager.designComponents, id: \.self) { component in
-                        Text(component.definition.name)
-                            .font(.subheadline.bold())
-                            .padding(.top)
-                        
-                        // We iterate through the *same* `displayedProperties` computed property.
-                        // When the button is pressed, this list will automatically update.
-                        ForEach(component.displayedProperties, id: \.self) { property in
-                            HStack {
-                                Text(property.key.label)
-                                Spacer()
-                                Text(property.value.description)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.leading)
-                        }
-                    }
-                }
+                .frame(maxWidth: .infinity)
             }
         }
-        .padding()
     }
 }
