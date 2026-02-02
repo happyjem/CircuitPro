@@ -14,268 +14,218 @@ final class CanvasEditorManager {
 
     // MARK: - Canvas State
 
-    let canvasStore: CanvasStore
     let textTarget: TextTarget
     let textOwnerID: UUID
 
-    var selectedElementIDs: Set<UUID> {
-        get { canvasStore.selection }
-        set { canvasStore.selection = newValue }
-    }
-
+    var items: [any CanvasItem] = []
+    var selectedElementIDs: Set<UUID> = []
     var selectedTool: CanvasTool = CursorTool()
-    let graph = CanvasGraph()
-    private var suppressGraphSelectionSync = false
-    private var primitiveCache: [NodeID: AnyCanvasPrimitive] = [:]
 
     // MARK: - Layer State
 
-    var layers: [CanvasLayer] = []
+    var layers: [any CanvasLayer] = []
     var activeLayerId: UUID?
 
     // MARK: - Computed Properties
 
     var pins: [Pin] {
-        graph.components(CanvasPin.self).map { $0.1.pin }
+        items.compactMap { $0 as? Pin }
     }
 
     var pads: [Pad] {
-        graph.components(GraphPadComponent.self).map { $0.1.pad }
+        items.compactMap { $0 as? Pad }
     }
 
     var primitives: [AnyCanvasPrimitive] {
-        graph.components(CanvasPrimitiveElement.self).map { $0.1.primitive }
+        items.compactMap { $0 as? AnyCanvasPrimitive }
     }
 
-    /// UPDATED: This now inspects the `resolvedText.content` property.
-    var placedTextContents: Set<CircuitTextContent> {
-        let contents = graph.components(CanvasText.self).map { $0.1.resolvedText.content }
-        return Set(contents)
+    var textDefinitions: [CircuitText.Definition] {
+        items.compactMap { $0 as? CircuitText.Definition }
     }
+
+    /// UPDATED: This now inspects the `content` property.
+    var placedTextContents: Set<CircuitTextContent> {
+        Set(textDefinitions.map { $0.content })
+    }
+
+    private var componentData: (name: String, prefix: String, properties: [Property.Definition]) = (
+        name: "",
+        prefix: "",
+        properties: []
+    )
 
     // MARK: - State Management
 
     init(textTarget: TextTarget = .symbol) {
-        self.canvasStore = CanvasStore()
         self.textTarget = textTarget
         self.textOwnerID = UUID()
-        self.canvasStore.onDelta = { [weak self] delta in
-            self?.handleStoreDelta(delta)
-        }
-        self.graph.onDelta = { [weak self] delta in
-            self?.handleGraphDelta(delta)
-        }
-    }
-
-    private func handleStoreDelta(_ delta: CanvasStoreDelta) {
-        switch delta {
-        case .selectionChanged(let selection):
-            guard !suppressGraphSelectionSync else { return }
-            let graphSelection = Set(
-                selection.compactMap { id -> GraphElementID? in
-                    let nodeID = NodeID(id)
-                    return graph.hasAnyComponent(for: nodeID) ? .node(nodeID) : nil
-                })
-            if graph.selection != graphSelection {
-                graph.selection = graphSelection
-            }
-        default:
-            break
-        }
-    }
-
-    private func handleGraphDelta(_ delta: UnifiedGraphDelta) {
-        switch delta {
-        case .selectionChanged(let selection):
-            let graphSelectionIDs = Set(selection.compactMap { $0.nodeID?.rawValue })
-            if canvasStore.selection != graphSelectionIDs {
-                suppressGraphSelectionSync = true
-                Task { @MainActor in
-                    self.canvasStore.selection = graphSelectionIDs
-                    self.suppressGraphSelectionSync = false
-                }
-            }
-        case .nodeComponentSet(let id, let componentKey):
-            if componentKey == ObjectIdentifier(CanvasPrimitiveElement.self),
-                let component = graph.component(CanvasPrimitiveElement.self, for: id)
-            {
-                primitiveCache[id] = component.primitive
-            }
-            canvasStore.invalidate()
-        case .nodeRemoved(let id):
-            primitiveCache.removeValue(forKey: id)
-            canvasStore.invalidate()
-        case .nodeComponentRemoved(let id, let componentKey):
-            if componentKey == ObjectIdentifier(CanvasPrimitiveElement.self) {
-                primitiveCache.removeValue(forKey: id)
-            }
-            canvasStore.invalidate()
-        case .edgeAdded,
-            .edgeRemoved,
-            .nodeAdded,
-            .edgeComponentSet,
-            .edgeComponentRemoved:
-            canvasStore.invalidate()
-        default:
-            break
-        }
     }
 
     struct ElementItem: Identifiable {
         enum Kind {
-            case primitive(NodeID, CanvasPrimitiveElement)
-            case text(NodeID, CanvasText)
-            case pin(NodeID, CanvasPin)
-            case pad(NodeID, GraphPadComponent)
+            case primitive(AnyCanvasPrimitive)
+            case text(CircuitText.Definition)
+            case pin(Pin)
+            case pad(Pad)
         }
 
         let kind: Kind
 
         var id: UUID {
             switch kind {
-            case .primitive(let id, _): return id.rawValue
-            case .text(let id, _): return id.rawValue
-            case .pin(let id, _): return id.rawValue
-            case .pad(let id, _): return id.rawValue
+            case .primitive(let primitive): return primitive.id
+            case .text(let text): return text.id
+            case .pin(let pin): return pin.id
+            case .pad(let pad): return pad.id
             }
         }
 
         var layerId: UUID? {
             switch kind {
-            case .primitive(_, let primitive):
+            case .primitive(let primitive):
                 return primitive.layerId
-            case .text(_, let text):
-                return text.layerId
-            case .pin(_, let pin):
-                return pin.layerId
-            case .pad(_, let pad):
-                return pad.layerId
+            case .text:
+                return nil
+            case .pin:
+                return nil
+            case .pad:
+                return nil
             }
         }
     }
 
     var elementItems: [ElementItem] {
-        let primitiveItems = graph.components(CanvasPrimitiveElement.self).map { id, primitive in
-            ElementItem(kind: .primitive(id, primitive))
-        }
-        let textItems = graph.components(CanvasText.self).map { id, text in
-            ElementItem(kind: .text(id, text))
-        }
-        let pinItems = graph.components(CanvasPin.self).map { id, pin in
-            ElementItem(kind: .pin(id, pin))
-        }
-        let padItems = graph.components(GraphPadComponent.self).map { id, pad in
-            ElementItem(kind: .pad(id, pad))
-        }
-        return primitiveItems + textItems + pinItems + padItems
-    }
-
-    var singleSelectedPrimitive: (id: NodeID, primitive: CanvasPrimitiveElement)? {
-        guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else { return nil }
-        let nodeID = NodeID(id)
-        guard let primitive = graph.component(CanvasPrimitiveElement.self, for: nodeID) else {
+        items.compactMap { item in
+            if let primitive = item as? AnyCanvasPrimitive {
+                return ElementItem(kind: .primitive(primitive))
+            }
+            if let text = item as? CircuitText.Definition {
+                return ElementItem(kind: .text(text))
+            }
+            if let pin = item as? Pin {
+                return ElementItem(kind: .pin(pin))
+            }
+            if let pad = item as? Pad {
+                return ElementItem(kind: .pad(pad))
+            }
             return nil
         }
-        return (nodeID, primitive)
     }
 
-    var singleSelectedText: (id: NodeID, text: CanvasText)? {
+    var singleSelectedPrimitive: (id: UUID, primitive: AnyCanvasPrimitive)? {
         guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else { return nil }
-        let nodeID = NodeID(id)
-        guard let text = graph.component(CanvasText.self, for: nodeID) else { return nil }
-        return (nodeID, text)
+        guard let primitive = items.first(where: { $0.id == id }) as? AnyCanvasPrimitive else {
+            return nil
+        }
+        return (id, primitive)
     }
 
-    var singleSelectedPin: (id: NodeID, pin: CanvasPin)? {
+    var singleSelectedText: (id: UUID, text: CircuitText.Definition)? {
         guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else { return nil }
-        let nodeID = NodeID(id)
-        guard let pin = graph.component(CanvasPin.self, for: nodeID) else { return nil }
-        return (nodeID, pin)
+        guard let text = items.first(where: { $0.id == id }) as? CircuitText.Definition else {
+            return nil
+        }
+        return (id, text)
     }
 
-    var singleSelectedPad: (id: NodeID, pad: GraphPadComponent)? {
+    var singleSelectedPin: (id: UUID, pin: Pin)? {
         guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else { return nil }
-        let nodeID = NodeID(id)
-        guard let pad = graph.component(GraphPadComponent.self, for: nodeID) else { return nil }
-        return (nodeID, pad)
+        guard let pin = items.first(where: { $0.id == id }) as? Pin else { return nil }
+        return (id, pin)
+    }
+
+    var singleSelectedPad: (id: UUID, pad: Pad)? {
+        guard selectedElementIDs.count == 1, let id = selectedElementIDs.first else { return nil }
+        guard let pad = items.first(where: { $0.id == id }) as? Pad else { return nil }
+        return (id, pad)
     }
 
     func primitiveBinding(for id: UUID) -> Binding<AnyCanvasPrimitive>? {
-        let nodeID = NodeID(id)
-        guard let component = graph.component(CanvasPrimitiveElement.self, for: nodeID) else {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let primitive = items[index] as? AnyCanvasPrimitive else {
             return nil
         }
+        let fallback = primitive
         return Binding(
-            get: { component.primitive },
-            set: {
-                component.primitive = $0
-                self.primitiveCache[nodeID] = $0
-                self.graph.setComponent(component, for: nodeID)
+            get: {
+                guard let current = self.items.first(where: { $0.id == id }) as? AnyCanvasPrimitive else {
+                    return fallback
+                }
+                return current
+            },
+            set: { newPrimitive in
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                self.items[currentIndex] = newPrimitive
             }
         )
     }
 
-    func textBinding(for id: UUID) -> Binding<CanvasText>? {
-        let nodeID = NodeID(id)
-        guard let component = graph.component(CanvasText.self, for: nodeID) else { return nil }
+    func textBinding(for id: UUID) -> Binding<CircuitText.Definition>? {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let text = items[index] as? CircuitText.Definition else { return nil }
+        let fallback = text
         return Binding(
-            get: { component },
+            get: {
+                guard let current = self.items.first(where: { $0.id == id }) as? CircuitText.Definition else {
+                    return fallback
+                }
+                return current
+            },
             set: { newValue in
-                self.setTextComponent(newValue, for: nodeID)
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                self.items[currentIndex] = newValue
             }
         )
-    }
-
-    private func setTextComponent(_ component: CanvasText, for id: NodeID) {
-        if !graph.nodes.contains(id) {
-            graph.addNode(id)
-        }
-        graph.setComponent(component, for: id)
     }
 
     func pinBinding(for id: UUID) -> Binding<Pin>? {
-        let nodeID = NodeID(id)
-        guard let component = graph.component(CanvasPin.self, for: nodeID) else { return nil }
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let pin = items[index] as? Pin else { return nil }
+        let fallback = pin
         return Binding(
-            get: { component.pin },
+            get: {
+                guard let current = self.items.first(where: { $0.id == id }) as? Pin else {
+                    return fallback
+                }
+                return current
+            },
             set: { newPin in
-                component.pin = newPin
-                self.graph.setComponent(component, for: nodeID)
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                self.items[currentIndex] = newPin
             }
         )
     }
 
     func padBinding(for id: UUID) -> Binding<Pad>? {
-        let nodeID = NodeID(id)
-        guard let component = graph.component(GraphPadComponent.self, for: nodeID) else {
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              let pad = items[index] as? Pad else {
             return nil
         }
+        let fallback = pad
         return Binding(
-            get: { component.pad },
+            get: {
+                guard let current = self.items.first(where: { $0.id == id }) as? Pad else {
+                    return fallback
+                }
+                return current
+            },
             set: { newPad in
-                var updated = component
-                updated.pad = newPad
-                self.graph.setComponent(updated, for: nodeID)
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                self.items[currentIndex] = newPad
             }
         )
     }
 
     func setupForFootprintEditing() {
         self.layers = LayerKind.footprintLayers.map { kind in
-            CanvasLayer(
-                id: kind.stableId,
-                name: kind.label,
-                isVisible: true,
-                color: NSColor(kind.defaultColor).cgColor,
-                zIndex: kind.zIndex,
-                kind: kind
-            )
+            PCBLayer(kind: kind)
         }
         self.layers.append(self.unlayeredSection)
         self.activeLayerId = self.layers.first?.id
     }
 
-    private let unlayeredSection: CanvasLayer = .init(
+    private let unlayeredSection: PCBLayer = .init(
         id: .init(),
         name: "Unlayered",
         isVisible: true,
@@ -284,22 +234,20 @@ final class CanvasEditorManager {
     )
 
     func reset() {
-        canvasStore.selection = []
-        canvasStore.invalidate()
+        selectedElementIDs = []
+        items = []
         selectedTool = CursorTool()
         layers = []
         activeLayerId = nil
-        primitiveCache.removeAll()
-        graph.reset()
     }
 
-    // Canvas items should live in the graph; no environment renderables.
+    // Canvas items should live in the items array; no graph-based storage.
 }
 
 // MARK: - Text Management
 extension CanvasEditorManager {
 
-    /// REWRITTEN: Creates text based on the new `CircuitTextContent` model.
+    /// Creates text based on the `CircuitTextContent` model.
     func addTextToSymbol(
         content: CircuitTextContent,
         componentData: (name: String, prefix: String, properties: [Property.Definition])
@@ -316,8 +264,7 @@ extension CanvasEditorManager {
             x: PaperSize.component.canvasSize().width / 2,
             y: PaperSize.component.canvasSize().height / 2)
 
-        // This assumes a new Resolvable model where `id` is the identity and `content` is an overridable property.
-        let tempDefinition = CircuitText.Definition(
+        let definition = CircuitText.Definition(
             id: newElementID,
             content: content,
             relativePosition: centerPoint,
@@ -330,68 +277,39 @@ extension CanvasEditorManager {
             isVisible: true
         )
 
-        let resolvedText = CircuitText.Resolver.resolve(definition: tempDefinition, override: nil)
-
-        let placeholder = self.resolveText(for: resolvedText.content, componentData: componentData)
-        let nodeID = NodeID(
-            GraphTextID.makeID(
-                for: resolvedText.source, ownerID: textOwnerID, fallback: newElementID))
-        let component = CanvasText(
-            resolvedText: resolvedText,
-            displayText: placeholder,
-            ownerID: textOwnerID,
-            target: textTarget,
-            ownerPosition: .zero,
-            ownerRotation: 0,
-            layerId: activeLayerId,
-            showsAnchorGuides: false
-        )
-
-        if !graph.nodes.contains(nodeID) {
-            graph.addNode(nodeID)
-        }
-        setTextComponent(component, for: nodeID)
+        _ = componentData
+        items.append(definition)
     }
 
-    /// REWRITTEN: Updates placeholder text in the graph-backed text components.
+    /// Dynamic text is resolved at render time; nothing to persist here.
     func updateDynamicTextElements(
         componentData: (name: String, prefix: String, properties: [Property.Definition])
     ) {
-        for (id, component) in graph.components(CanvasText.self) {
-            guard !component.resolvedText.content.isStatic else { continue }
-            let newText = resolveText(
-                for: component.resolvedText.content, componentData: componentData)
-            guard component.displayText != newText else { continue }
-            component.displayText = newText
-            setTextComponent(component, for: id)
-        }
+        self.componentData = componentData
     }
 
-    /// UPDATED: Switches on the new `content` enum.
+    /// Removes property text entries that no longer exist.
     func synchronizeSymbolTextWithProperties(properties: [Property.Definition]) {
         let validPropertyIDs = Set(properties.map { $0.id })
 
-        let idsToRemove = graph.components(CanvasText.self).compactMap { id, component -> NodeID? in
-            guard case .componentProperty(let definitionID, _) = component.resolvedText.content
-            else {
-                return nil
+        var idsToRemove = Set<UUID>()
+        for item in items {
+            guard let component = item as? CircuitText.Definition else { continue }
+            guard case .componentProperty(let definitionID, _) = component.content else {
+                continue
             }
-            return validPropertyIDs.contains(definitionID) ? nil : id
+            if !validPropertyIDs.contains(definitionID) {
+                idsToRemove.insert(component.id)
+            }
         }
 
         guard !idsToRemove.isEmpty else { return }
-        for id in idsToRemove {
-            graph.removeComponent(CanvasText.self, for: id)
-            if !graph.hasAnyComponent(for: id) {
-                graph.removeNode(id)
-            }
-        }
-        graph.selection.subtract(idsToRemove.map { .node($0) })
-        selectedElementIDs.subtract(idsToRemove.map { $0.rawValue })
+        items.removeAll { idsToRemove.contains($0.id) }
+        selectedElementIDs.subtract(idsToRemove)
     }
 
-    /// REWRITTEN: Takes a `CircuitTextContent` and resolves the placeholder string.
-    private func resolveText(
+    /// Resolves placeholder strings for dynamic text when needed by the UI.
+    func resolveText(
         for content: CircuitTextContent,
         componentData: (name: String, prefix: String, properties: [Property.Definition])
     ) -> String {
@@ -420,56 +338,53 @@ extension CanvasEditorManager {
         }
     }
 
-    /// REWRITTEN: Creates a custom binding to an enum's associated value.
+    func resolveText(_ definition: CircuitText.Definition) -> String {
+        resolveText(for: definition.content, componentData: componentData)
+    }
+
+    /// Creates a binding to a component property text's display options.
     func bindingForDisplayOptions(
         with id: UUID,
         componentData: (name: String, prefix: String, properties: [Property.Definition])
     ) -> Binding<TextDisplayOptions>? {
-        let nodeID = NodeID(id)
-        guard let component = graph.component(CanvasText.self, for: nodeID),
-            case .componentProperty(let definitionID, _) = component.resolvedText.content
+        guard let component = items.first(where: { $0.id == id }) as? CircuitText.Definition,
+              case .componentProperty(let definitionID, _) = component.content
         else {
             return nil
         }
 
         return Binding<TextDisplayOptions>(
             get: {
-                // Safely extract the options from the current content enum.
-                guard let current = self.graph.component(CanvasText.self, for: nodeID),
-                    case .componentProperty(_, let options) = current.resolvedText.content
+                guard let current = self.items.first(where: { $0.id == id }) as? CircuitText.Definition,
+                      case .componentProperty(_, let options) = current.content
                 else {
                     return .default
                 }
                 return options
             },
             set: { newOptions in
-                guard let current = self.graph.component(CanvasText.self, for: nodeID) else {
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }),
+                      var current = self.items[currentIndex] as? CircuitText.Definition else {
                     return
                 }
-                current.resolvedText.content = .componentProperty(
+                current.content = .componentProperty(
                     definitionID: definitionID, options: newOptions)
-                current.displayText = self.resolveText(
-                    for: current.resolvedText.content, componentData: componentData)
-                self.setTextComponent(current, for: nodeID)
+                self.items[currentIndex] = current
             }
         )
     }
 
-    /// UPDATED: Switches on the new `content` enum.
+    /// Removes a text item from the canvas.
     func removeTextFromSymbol(content: CircuitTextContent) {
-        let idsToRemove = graph.components(CanvasText.self).compactMap { id, component -> NodeID? in
-            component.resolvedText.content.isSameType(as: content) ? id : nil
+        let idsToRemove = items.compactMap { item -> UUID? in
+            guard let component = item as? CircuitText.Definition else { return nil }
+            return component.content.isSameType(as: content) ? component.id : nil
         }
 
         guard !idsToRemove.isEmpty else { return }
-        for id in idsToRemove {
-            graph.removeComponent(CanvasText.self, for: id)
-            if !graph.hasAnyComponent(for: id) {
-                graph.removeNode(id)
-            }
-        }
-        graph.selection.subtract(idsToRemove.map { .node($0) })
-        selectedElementIDs.subtract(idsToRemove.map { $0.rawValue })
+        let ids = Set(idsToRemove)
+        items.removeAll { ids.contains($0.id) }
+        selectedElementIDs.subtract(ids)
     }
 }
 

@@ -15,7 +15,7 @@ struct FootprintElementListView: View {
         let children: [OutlineItem]?
 
         enum Content {
-            case layer(CanvasLayer)
+            case layer(any CanvasLayer)
             case element(CanvasEditorManager.ElementItem)
         }
     }
@@ -28,9 +28,9 @@ struct FootprintElementListView: View {
     @State private var expandedLayers: Set<UUID> = []
 
     /// Tracks node IDs to detect when new elements are added.
-    @State private var previousNodeIDs: Set<UUID> = []
+    @State private var previousItemIDs: Set<UUID> = []
 
-    private var sortedLayers: [CanvasLayer] {
+    private var sortedLayers: [any CanvasLayer] {
         editor.layers.sorted { lhs, rhs in
             if lhs.zIndex == rhs.zIndex {
                 // Stable tie-breaker to avoid jitter
@@ -70,7 +70,7 @@ struct FootprintElementListView: View {
             // This now correctly controls which disclosure groups start open.
             // Populating with all layer IDs will auto-expand all layers.
             expandedLayers = Set(editor.layers.map { $0.id })
-            previousNodeIDs = Set(editor.elementItems.map(\.id))
+            previousItemIDs = Set(editor.elementItems.map(\.id))
         }
     }
 
@@ -78,7 +78,7 @@ struct FootprintElementListView: View {
 
     /// Creates the DisclosureGroup for a layer and its children.
     @ViewBuilder
-    private func disclosureGroupRow(for layer: CanvasLayer, children: [OutlineItem]) -> some View {
+    private func disclosureGroupRow(for layer: any CanvasLayer, children: [OutlineItem]) -> some View {
         // Binding to control the expansion state of a single layer.
         let isExpandedBinding = Binding<Bool>(
             get: { self.expandedLayers.contains(layer.id) },
@@ -106,7 +106,7 @@ struct FootprintElementListView: View {
 
     /// Creates the visual representation for a layer row in the list.
     @ViewBuilder
-    private func layerRow(for layer: CanvasLayer) -> some View {
+    private func layerRow(for layer: any CanvasLayer) -> some View {
         HStack {
             Image(systemName: "circle.fill")
                 .foregroundStyle(Color(cgColor: layer.color))
@@ -142,20 +142,20 @@ struct FootprintElementListView: View {
     /// When a new element is added to the canvas, expand its parent layer in the list.
     private func expandGroupForNewNodes() {
         let newNodes = editor.elementItems
-        let newNodeIDs = Set(newNodes.map(\.id))
+        let newItemIDs = Set(newNodes.map(\.id))
 
         // An item was added.
-        guard newNodeIDs.count > previousNodeIDs.count else {
-            previousNodeIDs = newNodeIDs
+        guard newItemIDs.count > previousItemIDs.count else {
+            previousItemIDs = newItemIDs
             return
         }
 
-        let addedNodeIDs = newNodeIDs.subtracting(previousNodeIDs)
+        let addedItemIDs = newItemIDs.subtracting(previousItemIDs)
 
         // Create a lookup for the new nodes.
         let nodesByID = Dictionary(uniqueKeysWithValues: newNodes.map { ($0.id, $0) })
 
-        for id in addedNodeIDs {
+        for id in addedItemIDs {
             if let newItem = nodesByID[id],
                let layerId = newItem.layerId {
                 expandedLayers.insert(layerId)
@@ -163,7 +163,7 @@ struct FootprintElementListView: View {
         }
 
         // Update the state for the next comparison.
-        previousNodeIDs = newNodeIDs
+        previousItemIDs = newItemIDs
     }
 
     // MARK: - Selection Synchronization Logic

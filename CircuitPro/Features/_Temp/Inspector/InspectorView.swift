@@ -15,25 +15,38 @@ struct InspectorView: View {
     @State private var selectedTab: InspectorTab = .attributes
 
     private var singleSelectedID: UUID? {
-        guard editorSession.selectedNodeIDs.count == 1 else { return nil }
-        return editorSession.selectedNodeIDs.first
+        guard editorSession.selectedItemIDs.count == 1 else { return nil }
+        return editorSession.selectedItemIDs.first
     }
 
-    private var activeGraph: CanvasGraph? {
-        switch editorSession.selectedEditor {
-        case .schematic:
-            return editorSession.schematicController.graph
-        case .layout:
-            return editorSession.layoutController.graph
-        }
+    private var selectedSchematicID: UUID? {
+        guard editorSession.selectedEditor == .schematic else { return nil }
+        return singleSelectedID
     }
 
-    private var selectedGraphID: NodeID? {
-        guard let selectedID = singleSelectedID,
-            let graph = activeGraph
+    private var selectedLayoutID: UUID? {
+        guard editorSession.selectedEditor == .layout else { return nil }
+        return singleSelectedID
+    }
+
+    private var selectedSchematicTextBinding: Binding<CircuitText.Resolved>? {
+        guard editorSession.selectedEditor == .schematic,
+              let selectedID = selectedSchematicID
         else { return nil }
-        let nodeID = NodeID(selectedID)
-        return graph.hasAnyComponent(for: nodeID) ? nodeID : nil
+        return componentTextBinding(
+            for: selectedID,
+            target: .symbol
+        )
+    }
+
+    private var selectedLayoutTextBinding: Binding<CircuitText.Resolved>? {
+        guard editorSession.selectedEditor == .layout,
+              let selectedID = selectedLayoutID
+        else { return nil }
+        return componentTextBinding(
+            for: selectedID,
+            target: .footprint
+        )
     }
 
     /// A computed property that finds the ComponentInstance for a selected schematic symbol.
@@ -49,28 +62,21 @@ struct InspectorView: View {
 
     /// A computed property that finds the ComponentInstance for a selected layout footprint.
     private var selectedFootprintContext:
-        (component: ComponentInstance, footprint: Binding<CanvasFootprint>)?
+        (component: ComponentInstance, footprint: Binding<FootprintInstance>)?
     {
         guard editorSession.selectedEditor == .layout,
-            let nodeID = selectedGraphID,
-            let footprintBinding = editorSession.layoutController.footprintBinding(
-                for: nodeID.rawValue),
+            let selectedID = selectedLayoutID,
             let componentInstance = projectManager.componentInstances.first(where: {
-                $0.id == nodeID.rawValue
-            })
+                $0.id == selectedID
+            }),
+            let footprintInstance = componentInstance.footprintInstance
         else { return nil }
 
+        let footprintBinding = Binding(
+            get: { componentInstance.footprintInstance ?? footprintInstance },
+            set: { componentInstance.footprintInstance = $0 }
+        )
         return (componentInstance, footprintBinding)
-    }
-
-    private var selectedTextBinding: Binding<CanvasText>? {
-        guard let nodeID = selectedGraphID else { return nil }
-        switch editorSession.selectedEditor {
-        case .schematic:
-            return editorSession.schematicController.textBinding(for: nodeID.rawValue)
-        case .layout:
-            return editorSession.layoutController.textBinding(for: nodeID.rawValue)
-        }
     }
 
     var body: some View {
@@ -89,16 +95,14 @@ struct InspectorView: View {
     /// The view content to display when the Schematic editor is active.
     @ViewBuilder
     private var schematicInspectorView: some View {
-        if let component = selectedSymbolComponent {
+        if let textBinding = selectedSchematicTextBinding {
+            ResolvedTextInspectorView(text: textBinding)
+        } else if let component = selectedSymbolComponent {
             SymbolNodeInspectorHostView(
                 component: component,
                 selectedTab: $selectedTab
             )
             .id(component.id)
-
-        } else if let textBinding = selectedTextBinding {
-            GraphTextInspectorView(text: textBinding)
-
         } else {
             selectionStatusView
         }
@@ -107,23 +111,14 @@ struct InspectorView: View {
     /// The view content to display when the Layout editor is active.
     @ViewBuilder
     private var layoutInspectorView: some View {
-        if let context = selectedFootprintContext {
+        if let textBinding = selectedLayoutTextBinding {
+            ResolvedTextInspectorView(text: textBinding)
+        } else if let context = selectedFootprintContext {
             FootprintNodeInspectorView(
                 component: context.component,
                 footprint: context.footprint
             )
             .id(context.component.id)
-
-        } else if let selection = editorSession.layoutController.singleSelectedPrimitive,
-            let binding = editorSession.layoutController.primitiveBinding(
-                for: selection.id.rawValue)
-        {
-            ScrollView {
-                PrimitivePropertiesView(primitive: binding)
-            }
-        } else if let textBinding = selectedTextBinding {
-            GraphTextInspectorView(text: textBinding)
-
         } else {
             selectionStatusView
         }
@@ -135,11 +130,58 @@ struct InspectorView: View {
         VStack {
             Spacer()
             Text(
-                editorSession.selectedNodeIDs.isEmpty ? "No Selection" : "Multiple Items Selected"
+                editorSession.selectedItemIDs.isEmpty ? "No Selection" : "Multiple Items Selected"
             )
             .foregroundColor(.secondary)
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func componentTextBinding(
+        for selectedID: UUID,
+        target: TextTarget
+    ) -> Binding<CircuitText.Resolved>? {
+        for component in projectManager.componentInstances {
+            let resolvedItems: [CircuitText.Resolved]
+            switch target {
+            case .symbol:
+                resolvedItems = component.symbolInstance.resolvedItems
+            case .footprint:
+                resolvedItems = component.footprintInstance?.resolvedItems ?? []
+            }
+
+            for resolved in resolvedItems {
+                let textID = CanvasTextID.makeID(
+                    for: resolved.source,
+                    ownerID: component.id,
+                    fallback: resolved.id
+                )
+                guard textID == selectedID else { continue }
+
+                return Binding(
+                    get: {
+                        let currentItems: [CircuitText.Resolved]
+                        switch target {
+                        case .symbol:
+                            currentItems = component.symbolInstance.resolvedItems
+                        case .footprint:
+                            currentItems = component.footprintInstance?.resolvedItems ?? []
+                        }
+                        return currentItems.first(where: { item in
+                            CanvasTextID.makeID(
+                                for: item.source,
+                                ownerID: component.id,
+                                fallback: item.id
+                            ) == selectedID
+                        }) ?? resolved
+                    },
+                    set: { updated in
+                        component.apply(updated, for: target)
+                    }
+                )
+            }
+        }
+        return nil
     }
 }

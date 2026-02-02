@@ -13,6 +13,7 @@ final class CanvasHostView: NSView {
     private let controller: CanvasController
     private let inputHandler: CanvasInputHandler
     private let dragDropHandler: CanvasDragDropHandler
+    private var isLayerUpdatePending = false
 
     // MARK: - Init & Setup
     init(controller: CanvasController, registeredDraggedTypes: [NSPasteboard.PasteboardType]) {
@@ -27,9 +28,7 @@ final class CanvasHostView: NSView {
 
         self.registerForDraggedTypes(registeredDraggedTypes)
 
-        for renderLayer in controller.renderLayers {
-            renderLayer.install(on: self.layer!)
-        }
+        controller.renderer.install(on: self.layer!)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -44,25 +43,28 @@ final class CanvasHostView: NSView {
         performLayerUpdate()
     }
 
+    func requestLayerUpdate() {
+        guard !isLayerUpdatePending else { return }
+        isLayerUpdatePending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isLayerUpdatePending = false
+            self.performLayerUpdate()
+        }
+    }
+
     func performLayerUpdate() {
         let context = controller.currentContext(for: self.bounds, visibleRect: self.visibleRect)
-        self.layer?.backgroundColor = context.environment.canvasTheme.backgroundColor
-
-        // Create the change context and fire the callback.
-        // This is the ideal central point for this event.
-        let changeContext = CanvasChangeContext(
-            rawMouseLocation: context.mouseLocation,
-            processedMouseLocation: context.processedMouseLocation,
-            visibleRect: context.visibleRect
-        )
-        controller.onCanvasChange?(changeContext)
+        self.layer?.backgroundColor = controller.environment.canvasTheme.backgroundColor
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        for renderLayer in controller.renderLayers {
-            renderLayer.update(using: context)
-        }
+        controller.environment.hitTargets.reset()
+        controller.canvasDragHandlers.reset()
+        var views = controller.renderViews
+        views.append(ToolPreviewView())
+        controller.renderer.render(views: views, context: context, environment: controller.environment)
 
         CATransaction.commit()
     }
@@ -72,6 +74,7 @@ final class CanvasHostView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.makeFirstResponder(self)
+        window?.acceptsMouseMovedEvents = true
         updateTrackingAreas()
     }
 
@@ -124,6 +127,7 @@ final class CanvasHostView: NSView {
 
         if wasHandled {
             window?.makeFirstResponder(self)
+            updateTrackingAreas()
         }
 
         return wasHandled

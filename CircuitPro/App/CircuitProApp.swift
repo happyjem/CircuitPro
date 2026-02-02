@@ -12,7 +12,6 @@ import SwiftUI
 struct CircuitProApp: App {
 
     @State private var packManager: SwiftDataPackManager
-    @AppStorage(AppThemeKeys.appearance) private var appearance = AppAppearance.system.rawValue
 
     init() {
         let manager = try! SwiftDataPackManager(for: [
@@ -24,8 +23,6 @@ struct CircuitProApp: App {
     }
 
     var body: some Scene {
-        let preferredScheme = AppAppearance(rawValue: appearance)?.preferredColorScheme
-
         WelcomeWindowScene(packManager: packManager)
             .commands {
                 CircuitProCommands()
@@ -40,10 +37,8 @@ struct CircuitProApp: App {
                         doc.scheduleAutosave()
                     }
                     .onDisappear { DocumentRegistry.shared.close(id: id) }
-                    .preferredColorScheme(preferredScheme)
             }
         }
-        .defaultSize(width: 1340, height: 800)
         .restorationBehavior(.disabled)
         .defaultLaunchBehavior(.suppressed)
 
@@ -51,13 +46,16 @@ struct CircuitProApp: App {
             ComponentDesignView()
                 .frame(minWidth: 800, minHeight: 600)
                 .packContainer(packManager)
-                .preferredColorScheme(preferredScheme)
+        }
+
+        Window("Connection Sandbox", id: "ConnectionSandboxWindow") {
+            ConnectionSandboxView()
+                .frame(minWidth: 800, minHeight: 600)
         }
 
         Window("Settings", id: "SettingsWindow") {
             SettingsView()
                 .frame(minWidth: 700, minHeight: 500)
-                .preferredColorScheme(preferredScheme)
         }
 
         AboutWindowScene()

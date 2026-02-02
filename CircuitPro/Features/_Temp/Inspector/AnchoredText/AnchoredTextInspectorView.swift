@@ -9,7 +9,7 @@ import SwiftUI
 
 struct GraphTextInspectorView: View {
 
-    @Binding var text: CanvasText
+    @Binding var text: CircuitText.Definition
 
     @State private var selectedTab: InspectorTab = .attributes
 
@@ -17,10 +17,10 @@ struct GraphTextInspectorView: View {
 
     private var anchorPositionBinding: Binding<CGPoint> {
         Binding(
-            get: { text.resolvedText.anchorPosition },
+            get: { text.anchorPosition },
             set: { newValue in
                 var updated = text
-                updated.resolvedText.anchorPosition = newValue
+                updated.anchorPosition = newValue
                 text = updated
             }
         )
@@ -28,10 +28,10 @@ struct GraphTextInspectorView: View {
 
     private var positionBinding: Binding<CGPoint> {
         Binding(
-            get: { text.resolvedText.relativePosition },
+            get: { text.relativePosition },
             set: { newValue in
                 var updated = text
-                updated.resolvedText.relativePosition = newValue
+                updated.relativePosition = newValue
                 text = updated
             }
         )
@@ -39,10 +39,10 @@ struct GraphTextInspectorView: View {
 
     private var anchorBinding: Binding<TextAnchor> {
         Binding(
-            get: { text.resolvedText.anchor },
+            get: { text.anchor },
             set: { newValue in
                 var updated = text
-                updated.resolvedText.anchor = newValue
+                updated.anchor = newValue
                 text = updated
             }
         )
@@ -70,6 +70,72 @@ struct GraphTextInspectorView: View {
 
                         //                        RotationControlView(object: $anchoredText)
 
+                    }
+                    Divider()
+                    InspectorSection("Text Options") {
+                        InspectorAnchorRow(textAnchor: anchorBinding)
+                    }
+                }
+                .padding(5)
+            }
+        }
+    }
+}
+
+struct ResolvedTextInspectorView: View {
+
+    @Binding var text: CircuitText.Resolved
+
+    @State private var selectedTab: InspectorTab = .attributes
+
+    var availableTabs: [InspectorTab] = [.attributes]
+
+    private var anchorPositionBinding: Binding<CGPoint> {
+        Binding(
+            get: { text.anchorPosition },
+            set: { newValue in
+                var updated = text
+                updated.anchorPosition = newValue
+                text = updated
+            }
+        )
+    }
+
+    private var positionBinding: Binding<CGPoint> {
+        Binding(
+            get: { text.relativePosition },
+            set: { newValue in
+                var updated = text
+                updated.relativePosition = newValue
+                text = updated
+            }
+        )
+    }
+
+    private var anchorBinding: Binding<TextAnchor> {
+        Binding(
+            get: { text.anchor },
+            set: { newValue in
+                var updated = text
+                updated.anchor = newValue
+                text = updated
+            }
+        )
+    }
+
+    var body: some View {
+        SidebarView(selectedTab: $selectedTab, availableTabs: availableTabs) {
+            ScrollView {
+                VStack(spacing: 5) {
+                    InspectorSection("Transform") {
+                        PointControlView(
+                            title: "Anchor",
+                            point: anchorPositionBinding
+                        )
+                        PointControlView(
+                            title: "Position",
+                            point: positionBinding
+                        )
                     }
                     Divider()
                     InspectorSection("Text Options") {

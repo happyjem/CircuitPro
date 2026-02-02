@@ -18,7 +18,6 @@ struct ComponentDesignView: View {
 
     @UserContext private var userContext
 
-    @AppStorage(AppThemeKeys.appearance) private var appearance = AppAppearance.system.rawValue
     @AppStorage(AppThemeKeys.canvasStyleList) private var stylesData = CanvasStyleStore
         .defaultStylesData
     @AppStorage(AppThemeKeys.canvasStyleSelectedLight) private var selectedLightStyleID =
@@ -67,18 +66,7 @@ struct ComponentDesignView: View {
                         } label: {
                             Text("Create Component")
                         }
-                        .modify { view in
-                            if #available(macOS 26.0, *) {
-                                view.buttonStyle(.glassProminent)
-                            } else {
-                                view
-                                    .buttonStyle(.plain)
-                                    .directionalPadding(vertical: 5, horizontal: 7.5)
-                                    .foregroundStyle(.white)
-                                    .background(Color.blue)
-                                    .clipShape(.rect(cornerRadius: 5))
-                            }
-                        }
+                        .buttonStyle(.glassProminent)
                     }
                 }
                 .onChange(of: componentDesignManager.componentProperties) {
@@ -89,13 +77,12 @@ struct ComponentDesignView: View {
         .onAppear {
             symbolCanvasManager.viewport.size = PaperSize.component.canvasSize()
             footprintCanvasManager.viewport.size = PaperSize.component.canvasSize()
-            applyCanvasTheme()
+            applyThemes()
         }
-        .onChange(of: appearance) { applyCanvasTheme() }
-        .onChange(of: stylesData) { applyCanvasTheme() }
-        .onChange(of: selectedLightStyleID) { applyCanvasTheme() }
-        .onChange(of: selectedDarkStyleID) { applyCanvasTheme() }
-        .onChange(of: colorScheme) { applyCanvasTheme() }
+        .onChange(of: stylesData) { applyThemes() }
+        .onChange(of: selectedLightStyleID) { applyThemes() }
+        .onChange(of: selectedDarkStyleID) { applyThemes() }
+        .onChange(of: colorScheme) { applyThemes() }
         .alert(
             "Error", isPresented: $showError,
             actions: {
@@ -226,54 +213,42 @@ struct ComponentDesignView: View {
     private func createTextDefinitions(from editor: CanvasEditorManager, anchor: CGPoint)
         -> [CircuitText.Definition]
     {
-        let textItems = editor.graph.components(CanvasText.self)
+        let textItems = editor.items.compactMap { $0 as? CircuitText.Definition }
 
-        return textItems.map { _, component in
-            let model = component.resolvedText
+        return textItems.map { definition in
             let centeredPosition = CGPoint(
-                x: model.relativePosition.x - anchor.x,
-                y: model.relativePosition.y - anchor.y
+                x: definition.relativePosition.x - anchor.x,
+                y: definition.relativePosition.y - anchor.y
             )
             let centeredAnchorPosition = CGPoint(
-                x: model.anchorPosition.x - anchor.x,
-                y: model.anchorPosition.y - anchor.y
+                x: definition.anchorPosition.x - anchor.x,
+                y: definition.anchorPosition.y - anchor.y
             )
 
-            var finalContent = model.content
-            if case .static = finalContent {
-                finalContent = .static(text: component.displayText)
-            }
-
             return CircuitText.Definition(
-                id: model.id,
-                content: finalContent,
+                id: definition.id,
+                content: definition.content,
                 relativePosition: centeredPosition,
                 anchorPosition: centeredAnchorPosition,
-                font: model.font,
-                color: model.color,
-                anchor: model.anchor,
-                alignment: model.alignment,
-                cardinalRotation: model.cardinalRotation,
-                isVisible: model.isVisible
+                font: definition.font,
+                color: definition.color,
+                anchor: definition.anchor,
+                alignment: definition.alignment,
+                cardinalRotation: definition.cardinalRotation,
+                isVisible: definition.isVisible
             )
         }
     }
 
-    private func applyCanvasTheme() {
+    private func applyThemes() {
         let styles = CanvasStyleStore.loadStyles(from: stylesData)
-        let appAppearance = AppAppearance(rawValue: appearance) ?? .system
-        let effectiveScheme: ColorScheme = {
-            switch appAppearance {
-            case .system: return colorScheme
-            case .light: return .light
-            case .dark: return .dark
-            }
-        }()
-        let selectedID = effectiveScheme == .dark ? selectedDarkStyleID : selectedLightStyleID
+        let selectedID = colorScheme == .dark ? selectedDarkStyleID : selectedLightStyleID
         let style = CanvasStyleStore.selectedStyle(from: styles, selectedID: selectedID)
-        let theme = CanvasThemeSettings.makeTheme(from: style)
-        symbolCanvasManager.applyTheme(theme)
-        footprintCanvasManager.applyTheme(theme)
+        let canvasTheme = CanvasThemeSettings.makeTheme(from: style)
+        let schematicTheme = SchematicThemeSettings.makeTheme(from: style)
+        symbolCanvasManager.applyTheme(canvasTheme)
+        symbolCanvasManager.applySchematicTheme(schematicTheme)
+        footprintCanvasManager.applyTheme(canvasTheme)
     }
 
     private func resetForNewComponent() {
